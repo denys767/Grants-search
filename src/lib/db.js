@@ -2,7 +2,7 @@ const mysql = require('mysql2/promise');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
-const pool = mysql.createPool({
+const dbConfig = {
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
@@ -10,7 +10,9 @@ const pool = mysql.createPool({
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
-});
+};
+
+const pool = mysql.createPool(dbConfig);
 
 async function saveGrants(grants) {
     if (!grants || grants.length === 0) {
@@ -46,26 +48,100 @@ async function saveGrants(grants) {
 }
 
 async function setupDatabase() {
-    const connection = await pool.getConnection();
+    const { host, user, password, database } = dbConfig;
+    let connection;
     try {
-        await connection.execute(`
+        // Connect without specifying the database
+        connection = await mysql.createConnection({ host, user, password });
+        
+        // Create the database if it doesn't exist
+        await connection.execute(`CREATE DATABASE IF NOT EXISTS \`${database}\``);
+        console.log(`Database "${database}" is ready.`);
+        
+        // Close this connection and use the pool for table creation
+        await connection.end();
+
+        // Now, get a connection from the pool (which is configured with the database)
+        const poolConnection = await pool.getConnection();
+        await poolConnection.execute(`
             CREATE TABLE IF NOT EXISTS grants (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 title VARCHAR(255) NOT NULL,
-                url VARCHAR(2048) NOT NULL UNIQUE,
+                url VARCHAR(2048) NOT NULL,
                 deadline VARCHAR(20) DEFAULT 'N/A',
                 category VARCHAR(255) NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY url_idx (url(255))
             );
         `);
-        console.log('Database table "grants" is ready.');
+        console.log('Table "grants" is ready.');
+        poolConnection.release();
     } catch (error) {
         console.error('Error setting up database:', error);
+        if (connection) await connection.end();
+        throw error;
+    }
+}
+
+async function getGrants({ category = null, page = null, limit = null } = {}) {
+    const connection = await pool.getConnection();
+    try {
+        console.log('getGrants called with:', { category, page, limit });
+        
+        // Build base queries
+        let baseQuery = 'SELECT * FROM grants';
+        let countQuery = 'SELECT COUNT(*) as count FROM grants';
+        let whereClause = '';
+        const whereParams = [];
+
+        // Add WHERE clause if category filter is applied
+        if (category && category !== 'all') {
+            whereClause = ' WHERE category = ?';
+            whereParams.push(category);
+        }
+
+        // Execute count query
+        const fullCountQuery = countQuery + whereClause;
+        console.log('Executing count query:', fullCountQuery, 'with params:', whereParams);
+        const [[{ count }]] = await connection.execute(fullCountQuery, whereParams);
+
+        // Build main query
+        let fullQuery = baseQuery + whereClause + ' ORDER BY deadline DESC, created_at DESC';
+        let mainQueryParams = [...whereParams];
+
+        // Add pagination if needed
+        if (page && limit) {
+            const pageNum = parseInt(page, 10);
+            const limitNum = parseInt(limit, 10);
+            const offset = (pageNum - 1) * limitNum;
+            fullQuery += ' LIMIT ' + limitNum + ' OFFSET ' + offset;
+        }
+
+        console.log('Executing main query:', fullQuery, 'with params:', mainQueryParams);
+        const [rows] = await connection.execute(fullQuery, mainQueryParams);
+
+        return { grants: rows, total: count };
+
+    } catch (error) {
+        console.error('Error fetching grants from DB:', error);
         throw error;
     } finally {
         connection.release();
     }
 }
 
-module.exports = { saveGrants, setupDatabase };
+async function getGrantCategories() {
+    const connection = await pool.getConnection();
+    try {
+        const [rows] = await connection.execute('SELECT DISTINCT category FROM grants WHERE category IS NOT NULL ORDER BY category ASC');
+        return rows.map(row => row.category);
+    } catch (error) {
+        console.error('Error fetching grant categories from DB:', error);
+        throw error;
+    } finally {
+        connection.release();
+    }
+}
+
+module.exports = { saveGrants, setupDatabase, getGrants, getGrantCategories };

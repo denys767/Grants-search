@@ -30,8 +30,8 @@ async function extractGrantInfo(text, url) {
 
         Мені потрібні такі поля:
         1. Назва можливості (title)
-        2. Дедлайн у форматі YYYY-MM-DD (deadline). Якщо не знайдено, вкажи "N/A".
-        3. Категорія (category). Вибери одну з цих категорій на основі ключових слів: ${categories.join(', ')}. Якщо не можеш визначити за ключовими словами, вкажи "N/A" або вкажи категорію з наведених на власний розсуд.
+        2. Дедлайн у форматі YYYY-MM-DD (deadline). Якщо не знайдено, вкажи null
+        3. Категорія (category). На основі ключових слів чи контексту вибери одну з цих категорій : ${categories.join(', ')}. Якщо жодна категорія не підходить, вкажи null
 
         Ключові слова для категорій:
         ${JSON.stringify(keywords, null, 2)}
@@ -56,6 +56,12 @@ async function extractGrantInfo(text, url) {
         content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         
         const result = JSON.parse(content);
+
+        if (result.category === null) {
+            console.log(`Grant "${result.title}" from ${url} skipped because it does not match any category.`);
+            return null;
+        }
+
         return { ...result, url };
 
     } catch (error) {
