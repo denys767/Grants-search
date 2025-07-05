@@ -25,7 +25,9 @@ async function sendWeeklyGrants() {
             await app.client.chat.postMessage({
                 token: process.env.SLACK_BOT_TOKEN,
                 channel: process.env.SLACK_CHANNEL_ID,
-                text: message
+                text: message,
+                unfurl_links: false,
+                unfurl_media: false
             });
         } catch (error) {
             console.error('Error sending weekly grants to Slack:', error);
@@ -34,9 +36,9 @@ async function sendWeeklyGrants() {
 }
 
 // Helper function to build the grant list message
-async function buildGrantsView(category = 'all', page = 1) {
+async function buildGrantsView(category = 'all', page = 1, sortOrder = 'desc') {
     const limit = 5; // 5 grants per page
-    const { grants, total } = await getGrants({ category, page, limit });
+    const { grants, total } = await getGrants({ category, page, limit, sortOrder });
     const categories = await getGrantCategories();
     const totalPages = Math.ceil(total / limit);
 
@@ -52,30 +54,60 @@ async function buildGrantsView(category = 'all', page = 1) {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "Використовуйте фільтр, щоб знайти гранти за категорією."
-            },
-            "accessory": {
-                "type": "static_select",
-                "placeholder": {
-                    "type": "plain_text",
-                    "text": "Фільтрувати за категорією"
-                },
-                "action_id": "filter_by_category",
-                "options": [
-                    {
-                        "text": { "type": "plain_text", "text": "Усі категорії" },
-                        "value": "all"
-                    },
-                    ...categories.map(cat => ({
-                        "text": { "type": "plain_text", "text": cat },
-                        "value": cat
-                    }))
-                ],
-                "initial_option": category ? {
-                    "text": { "type": "plain_text", "text": category === 'all' ? "Усі категорії" : category },
-                    "value": category
-                } : undefined
+                "text": "Використовуйте фільтри для пошуку грантів."
             }
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "static_select",
+                    "placeholder": {
+                        "type": "plain_text",
+                        "text": "Фільтрувати за категорією"
+                    },
+                    "action_id": "filter_by_category",
+                    "options": [
+                        {
+                            "text": { "type": "plain_text", "text": "Усі категорії" },
+                            "value": "all"
+                        },
+                        ...categories.map(cat => ({
+                            "text": { "type": "plain_text", "text": cat },
+                            "value": cat
+                        }))
+                    ],
+                    "initial_option": category ? {
+                        "text": { "type": "plain_text", "text": category === 'all' ? "Усі категорії" : category },
+                        "value": category
+                    } : undefined
+                },
+                {
+                    "type": "static_select",
+                    "placeholder": {
+                        "type": "plain_text",
+                        "text": "Сортування за дедлайном"
+                    },
+                    "action_id": "sort_by_deadline",
+                    "options": [
+                        {
+                            "text": { "type": "plain_text", "text": "Спочатку найближчі дедлайни" },
+                            "value": "asc"
+                        },
+                        {
+                            "text": { "type": "plain_text", "text": "Спочатку віддалені дедлайни" },
+                            "value": "desc"
+                        }
+                    ],
+                    "initial_option": {
+                        "text": { 
+                            "type": "plain_text", 
+                            "text": sortOrder === 'asc' ? "Спочатку найближчі дедлайни" : "Спочатку віддалені дедлайни" 
+                        },
+                        "value": sortOrder
+                    }
+                }
+            ]
         },
         { "type": "divider" }
     ];
@@ -95,7 +127,7 @@ async function buildGrantsView(category = 'all', page = 1) {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": `*<${grant.url}|${grant.title}>*\n*Дедлайн:* ${grant.deadline || 'N/A'}\n*Категорія:* ${grant.category}`
+                    "text": `🔗*<${grant.url}|${grant.title}>*\n*⏰Дедлайн:* ${grant.deadline || 'N/A'}\n*📦Категорія:* ${grant.category}`
                 }
             });
         });
@@ -108,7 +140,7 @@ async function buildGrantsView(category = 'all', page = 1) {
             "type": "button",
             "text": { "type": "plain_text", "text": "⬅️ Попередня" },
             "action_id": "prev_page",
-            "value": JSON.stringify({ category, page: page - 1 })
+            "value": JSON.stringify({ category, page: page - 1, sortOrder })
         });
     }
     if (page < totalPages) {
@@ -116,7 +148,7 @@ async function buildGrantsView(category = 'all', page = 1) {
             "type": "button",
             "text": { "type": "plain_text", "text": "Наступна ➡️" },
             "action_id": "next_page",
-            "value": JSON.stringify({ category, page: page + 1 })
+            "value": JSON.stringify({ category, page: page + 1, sortOrder })
         });
     }
 
@@ -150,7 +182,9 @@ app.command('/grants', async ({ ack, command, client }) => {
         await client.chat.postMessage({
             channel: command.channel_id,
             blocks: view.blocks,
-            text: "Ось список грантів" // Fallback text
+            text: "Ось список грантів", // Fallback text
+            unfurl_links: false,
+            unfurl_media: false
         });
     } catch (error) {
         console.error(error);
@@ -160,13 +194,15 @@ app.command('/grants', async ({ ack, command, client }) => {
 const updateGrantsView = async ({ ack, body, client, action }) => {
     await ack();
     try {
-        const { category, page } = JSON.parse(action.value);
-        const view = await buildGrantsView(category, page);
+        const { category, page, sortOrder } = JSON.parse(action.value);
+        const view = await buildGrantsView(category, page, sortOrder);
         await client.chat.update({
             channel: body.channel.id,
             ts: body.message.ts,
             blocks: view.blocks,
-            text: "Ось оновлений список грантів"
+            text: "Ось оновлений список грантів",
+            unfurl_links: false,
+            unfurl_media: false
         });
     } catch (error) {
         console.error(error);
@@ -180,12 +216,36 @@ app.action('filter_by_category', async ({ ack, body, client, action }) => {
     await ack();
     try {
         const category = action.selected_option.value;
-        const view = await buildGrantsView(category, 1); // Reset to page 1
+        // Get current sort order from the message if possible, default to 'desc'
+        const currentSortOrder = 'desc'; // You could extract this from current state if needed
+        const view = await buildGrantsView(category, 1, currentSortOrder); // Reset to page 1
         await client.chat.update({
             channel: body.channel.id,
             ts: body.message.ts,
             blocks: view.blocks,
-            text: "Ось відфільтрований список грантів"
+            text: "Ось відфільтрований список грантів",
+            unfurl_links: false,
+            unfurl_media: false
+        });
+    } catch (error) {
+        console.error(error);
+    }
+});
+
+app.action('sort_by_deadline', async ({ ack, body, client, action }) => {
+    await ack();
+    try {
+        const sortOrder = action.selected_option.value;
+        // Get current category from the message if possible, default to 'all'
+        const currentCategory = 'all'; // You could extract this from current state if needed
+        const view = await buildGrantsView(currentCategory, 1, sortOrder); // Reset to page 1
+        await client.chat.update({
+            channel: body.channel.id,
+            ts: body.message.ts,
+            blocks: view.blocks,
+            text: "Ось відсортований список грантів",
+            unfurl_links: false,
+            unfurl_media: false
         });
     } catch (error) {
         console.error(error);

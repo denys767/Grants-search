@@ -84,10 +84,10 @@ async function setupDatabase() {
     }
 }
 
-async function getGrants({ category = null, page = null, limit = null } = {}) {
+async function getGrants({ category = null, page = null, limit = null, sortOrder = 'desc' } = {}) {
     const connection = await pool.getConnection();
     try {
-        console.log('getGrants called with:', { category, page, limit });
+        console.log('getGrants called with:', { category, page, limit, sortOrder });
         
         // Build base queries
         let baseQuery = 'SELECT * FROM grants';
@@ -106,8 +106,9 @@ async function getGrants({ category = null, page = null, limit = null } = {}) {
         console.log('Executing count query:', fullCountQuery, 'with params:', whereParams);
         const [[{ count }]] = await connection.execute(fullCountQuery, whereParams);
 
-        // Build main query
-        let fullQuery = baseQuery + whereClause + ' ORDER BY deadline DESC, created_at DESC';
+        // Build main query with sorting
+        const sortDirection = sortOrder === 'asc' ? 'ASC' : 'DESC';
+        let fullQuery = baseQuery + whereClause + ` ORDER BY deadline ${sortDirection}, created_at ${sortDirection}`;
         let mainQueryParams = [...whereParams];
 
         // Add pagination if needed
