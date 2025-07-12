@@ -5,7 +5,7 @@ const gurtScraper = require('./scrapers/gurtScraper');
 const prostirScraper = require('./scrapers/prostirScraper');
 const grantMarketScraper = require('./scrapers/grantMarketScraper');
 const euScraper = require('./scrapers/euScraper');
-const opportunityDeskScraper = require('./scrapers/opportunityDeskScraper');
+const opportunityDeskScraper = require('./scrapers/opportunityDeskScraper');455
 const { saveGrants, setupDatabase } = require('./lib/db');
 const { sendWeeklyGrants, startSlackApp } = require('./services/slack');
 
@@ -39,15 +39,21 @@ async function scrapeAll() {
     console.log('Scraping finished.');
 }
 
-cron.schedule('0 9 * * 1', () => { // Every Monday at 9 AM
-    console.log('Running weekly grant scraping and notification job.');
-    scrapeAll();
-    sendWeeklyGrants();
+// Schedule scraping every Monday at 8 AM
+cron.schedule('0 8 * * 1', async () => {
+    console.log('Running weekly grant scraping...');
+    await scrapeAll();
+});
+
+// Schedule weekly report every Monday at 9 AM (after scraping)
+cron.schedule('0 9 * * 1', async () => {
+    console.log('Sending weekly grants report...');
+    await sendWeeklyGrants();
 });
 
 // Start the Slack App
 startSlackApp();
 
 // Optional: Run once on startup for testing
-// scrapeAll();
-// sendWeeklyGrants();
+ //scrapeAll();
+ sendWeeklyGrants();

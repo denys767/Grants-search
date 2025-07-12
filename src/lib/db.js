@@ -84,10 +84,10 @@ async function setupDatabase() {
     }
 }
 
-async function getGrants({ category = null, page = null, limit = null, sortOrder = 'desc' } = {}) {
+async function getGrants({ category = null, page = null, limit = null, sortOrder = 'asc', hideExpired = false } = {}) {
     const connection = await pool.getConnection();
     try {
-        console.log('getGrants called with:', { category, page, limit, sortOrder });
+        console.log('getGrants called with:', { category, page, limit, sortOrder, hideExpired });
         
         // Build base queries
         let baseQuery = 'SELECT * FROM grants';
@@ -95,10 +95,22 @@ async function getGrants({ category = null, page = null, limit = null, sortOrder
         let whereClause = '';
         const whereParams = [];
 
-        // Add WHERE clause if category filter is applied
+        // Add WHERE clause conditions
+        const conditions = [];
+        
+        // Category filter
         if (category && category !== 'all') {
-            whereClause = ' WHERE category = ?';
+            conditions.push('category = ?');
             whereParams.push(category);
+        }
+        
+        // Hide expired grants filter
+        if (hideExpired) {
+            conditions.push('(deadline = "N/A" OR STR_TO_DATE(deadline, "%d-%m-%Y") >= CURDATE())');
+        }
+        
+        if (conditions.length > 0) {
+            whereClause = ' WHERE ' + conditions.join(' AND ');
         }
 
         // Execute count query
@@ -108,7 +120,13 @@ async function getGrants({ category = null, page = null, limit = null, sortOrder
 
         // Build main query with sorting
         const sortDirection = sortOrder === 'asc' ? 'ASC' : 'DESC';
-        let fullQuery = baseQuery + whereClause + ` ORDER BY deadline ${sortDirection}, created_at ${sortDirection}`;
+        const orderByClause = `
+            ORDER BY 
+                CASE WHEN deadline = 'N/A' THEN 1 ELSE 0 END, 
+                STR_TO_DATE(deadline, '%d-%m-%Y') ${sortDirection}, 
+                created_at DESC
+        `;
+        let fullQuery = baseQuery + whereClause + orderByClause;
         let mainQueryParams = [...whereParams];
 
         // Add pagination if needed
@@ -145,4 +163,32 @@ async function getGrantCategories() {
     }
 }
 
-module.exports = { saveGrants, setupDatabase, getGrants, getGrantCategories };
+async function getWeeklyGrants() {
+    const connection = await pool.getConnection();
+    try {
+        console.log('Getting grants from the last week...');
+        
+        // Get grants created in the last 7 days
+        const query = `
+            SELECT * FROM grants 
+            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+            ORDER BY 
+                CASE WHEN deadline = 'N/A' THEN 1 ELSE 0 END, 
+                STR_TO_DATE(deadline, '%d-%m-%Y') ASC,
+                created_at DESC
+        `;
+        
+        console.log('Executing query:', query);
+        const [rows] = await connection.execute(query);
+        
+        console.log(`Found ${rows.length} grants from the last week`);
+        return rows;
+    } catch (error) {
+        console.error('Error fetching weekly grants from DB:', error);
+        throw error;
+    } finally {
+        connection.release();
+    }
+}
+
+module.exports = { saveGrants, setupDatabase, getGrants, getGrantCategories, getWeeklyGrants };

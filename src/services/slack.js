@@ -1,5 +1,5 @@
 const { App } = require('@slack/bolt');
-const { getGrants, getGrantCategories } = require('../lib/db');
+const { getGrants, getGrantCategories, getWeeklyGrants } = require('../lib/db');
 
 const app = new App({
     token: process.env.SLACK_BOT_TOKEN,
@@ -7,21 +7,22 @@ const app = new App({
 });
 
 async function sendWeeklyGrants() {
-    const { grants } = await getGrants(); // Destructure to get grants array
-    const newGrants = grants.filter(grant => {
-        const grantDate = new Date(grant.created_at);
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        return grantDate > weekAgo;
-    });
+    try {
+        console.log('Starting weekly grants notification...');
+        const newGrants = await getWeeklyGrants();
+        
+        if (newGrants.length > 0) {
+            console.log(`Found ${newGrants.length} new grants for weekly report`);
+            
+            let message = `📊 *Звіт за тиждень*\nЗнайдено ${newGrants.length} нових грантів:\n\n`;
+            newGrants.forEach((grant, index) => {
+                const deadline = grant.deadline ? ` | Дедлайн: ${grant.deadline}` : '';
+                const category = grant.category ? ` | ${grant.category}` : '';
+                message += `${index + 1}. <${grant.url}|${grant.title}>${deadline}${category}\n`;
+            });
+            
+            message += `\n💡 Використовуйте \`/grants\` для детального перегляду та фільтрації`;
 
-    if (newGrants.length > 0) {
-        let message = 'Нові гранти за останній тиждень:\n';
-        newGrants.forEach(grant => {
-            message += `<${grant.url}|${grant.title}>; ${grant.deadline}; ${grant.category}\n`;
-        });
-
-        try {
             await app.client.chat.postMessage({
                 token: process.env.SLACK_BOT_TOKEN,
                 channel: process.env.SLACK_CHANNEL_ID,
@@ -29,16 +30,29 @@ async function sendWeeklyGrants() {
                 unfurl_links: false,
                 unfurl_media: false
             });
-        } catch (error) {
-            console.error('Error sending weekly grants to Slack:', error);
+            
+            console.log('Weekly grants notification sent successfully');
+        } else {
+            console.log('No new grants found for weekly report');
+            
+            // Відправляємо повідомлення про те, що нових грантів немає
+            await app.client.chat.postMessage({
+                token: process.env.SLACK_BOT_TOKEN,
+                channel: process.env.SLACK_CHANNEL_ID,
+                text: "📊 *Звіт за тиждень*\nНових грантів за останній тиждень не знайдено.\n\n💡 Використовуйте `/grants` для перегляду всіх доступних грантів",
+                unfurl_links: false,
+                unfurl_media: false
+            });
         }
+    } catch (error) {
+        console.error('Error sending weekly grants to Slack:', error);
     }
 }
 
 // Helper function to build the grant list message
-async function buildGrantsView(category = 'all', page = 1, sortOrder = 'desc') {
+async function buildGrantsView(category = 'all', page = 1, sortOrder = 'asc', hideExpired = false) {
     const limit = 5; // 5 grants per page
-    const { grants, total } = await getGrants({ category, page, limit, sortOrder });
+    const { grants, total } = await getGrants({ category, page, limit, sortOrder, hideExpired });
     const categories = await getGrantCategories();
     const totalPages = Math.ceil(total / limit);
 
@@ -109,6 +123,29 @@ async function buildGrantsView(category = 'all', page = 1, sortOrder = 'desc') {
                 }
             ]
         },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "checkboxes",
+                    "action_id": "toggle_expired",
+                    "options": [
+                        {
+                            "text": { "type": "plain_text", "text": "Приховати прострочені гранти" },
+                            "value": "hide_expired"
+                        }
+                    ],
+                    ...(hideExpired && {
+                        "initial_options": [
+                            {
+                                "text": { "type": "plain_text", "text": "Приховати прострочені гранти" },
+                                "value": "hide_expired"
+                            }
+                        ]
+                    })
+                }
+            ]
+        },
         { "type": "divider" }
     ];
 
@@ -140,7 +177,7 @@ async function buildGrantsView(category = 'all', page = 1, sortOrder = 'desc') {
             "type": "button",
             "text": { "type": "plain_text", "text": "⬅️ Попередня" },
             "action_id": "prev_page",
-            "value": JSON.stringify({ category, page: page - 1, sortOrder })
+            "value": JSON.stringify({ category, page: page - 1, sortOrder, hideExpired })
         });
     }
     if (page < totalPages) {
@@ -148,7 +185,7 @@ async function buildGrantsView(category = 'all', page = 1, sortOrder = 'desc') {
             "type": "button",
             "text": { "type": "plain_text", "text": "Наступна ➡️" },
             "action_id": "next_page",
-            "value": JSON.stringify({ category, page: page + 1, sortOrder })
+            "value": JSON.stringify({ category, page: page + 1, sortOrder, hideExpired })
         });
     }
 
@@ -175,6 +212,27 @@ async function buildGrantsView(category = 'all', page = 1, sortOrder = 'desc') {
     return { blocks };
 }
 
+// Helper function to extract current state from the view
+function extractStateFromView(body) {
+    const actionsBlocks = body.message.blocks.filter(b => b.type === 'actions');
+    if (actionsBlocks.length === 0) return { category: 'all', sortOrder: 'asc', hideExpired: false };
+
+    // Find controls in different action blocks
+    let categoryElement, sortElement, expiredElement;
+    
+    actionsBlocks.forEach(block => {
+        if (!categoryElement) categoryElement = block.elements.find(e => e.action_id === 'filter_by_category');
+        if (!sortElement) sortElement = block.elements.find(e => e.action_id === 'sort_by_deadline');
+        if (!expiredElement) expiredElement = block.elements.find(e => e.action_id === 'toggle_expired');
+    });
+
+    const category = categoryElement?.initial_option?.value || 'all';
+    const sortOrder = sortElement?.initial_option?.value || 'asc';
+    const hideExpired = expiredElement?.initial_options?.length > 0 || false;
+
+    return { category, sortOrder, hideExpired };
+}
+
 app.command('/grants', async ({ ack, command, client }) => {
     await ack();
     try {
@@ -194,8 +252,8 @@ app.command('/grants', async ({ ack, command, client }) => {
 const updateGrantsView = async ({ ack, body, client, action }) => {
     await ack();
     try {
-        const { category, page, sortOrder } = JSON.parse(action.value);
-        const view = await buildGrantsView(category, page, sortOrder);
+        const { category, page, sortOrder, hideExpired } = JSON.parse(action.value);
+        const view = await buildGrantsView(category, page, sortOrder, hideExpired);
         await client.chat.update({
             channel: body.channel.id,
             ts: body.message.ts,
@@ -215,10 +273,9 @@ app.action('prev_page', updateGrantsView);
 app.action('filter_by_category', async ({ ack, body, client, action }) => {
     await ack();
     try {
-        const category = action.selected_option.value;
-        // Get current sort order from the message if possible, default to 'desc'
-        const currentSortOrder = 'desc'; // You could extract this from current state if needed
-        const view = await buildGrantsView(category, 1, currentSortOrder); // Reset to page 1
+        const newCategory = action.selected_option.value;
+        const { sortOrder, hideExpired } = extractStateFromView(body);
+        const view = await buildGrantsView(newCategory, 1, sortOrder, hideExpired); // Reset to page 1
         await client.chat.update({
             channel: body.channel.id,
             ts: body.message.ts,
@@ -235,15 +292,33 @@ app.action('filter_by_category', async ({ ack, body, client, action }) => {
 app.action('sort_by_deadline', async ({ ack, body, client, action }) => {
     await ack();
     try {
-        const sortOrder = action.selected_option.value;
-        // Get current category from the message if possible, default to 'all'
-        const currentCategory = 'all'; // You could extract this from current state if needed
-        const view = await buildGrantsView(currentCategory, 1, sortOrder); // Reset to page 1
+        const newSortOrder = action.selected_option.value;
+        const { category, hideExpired } = extractStateFromView(body);
+        const view = await buildGrantsView(category, 1, newSortOrder, hideExpired); // Reset to page 1
         await client.chat.update({
             channel: body.channel.id,
             ts: body.message.ts,
             blocks: view.blocks,
             text: "Ось відсортований список грантів",
+            unfurl_links: false,
+            unfurl_media: false
+        });
+    } catch (error) {
+        console.error(error);
+    }
+});
+
+app.action('toggle_expired', async ({ ack, body, client, action }) => {
+    await ack();
+    try {
+        const newHideExpired = action.selected_options.length > 0;
+        const { category, sortOrder } = extractStateFromView(body);
+        const view = await buildGrantsView(category, 1, sortOrder, newHideExpired); // Reset to page 1
+        await client.chat.update({
+            channel: body.channel.id,
+            ts: body.message.ts,
+            blocks: view.blocks,
+            text: newHideExpired ? "Прострочені гранти приховані" : "Показано всі гранти",
             unfurl_links: false,
             unfurl_media: false
         });
