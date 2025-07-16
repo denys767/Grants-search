@@ -1,6 +1,23 @@
 const { App } = require('@slack/bolt');
 const { getGrants, getGrantCategories, getWeeklyGrants } = require('../lib/db');
 
+// Helper function to format date for display
+function formatDeadline(deadline) {
+    if (!deadline) return 'N/A';
+    
+    try {
+        const date = new Date(deadline);
+        // Format as dd-mm-yyyy for Ukrainian users
+        return date.toLocaleDateString('uk-UA', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+        });
+    } catch (error) {
+        return 'N/A';
+    }
+}
+
 const app = new App({
     token: process.env.SLACK_BOT_TOKEN,
     signingSecret: process.env.SLACK_SIGNING_SECRET
@@ -8,15 +25,12 @@ const app = new App({
 
 async function sendWeeklyGrants() {
     try {
-        console.log('Starting weekly grants notification...');
         const newGrants = await getWeeklyGrants();
         
         if (newGrants.length > 0) {
-            console.log(`Found ${newGrants.length} new grants for weekly report`);
-            
             let message = `📊 *Звіт за тиждень*\nЗнайдено ${newGrants.length} нових грантів:\n\n`;
             newGrants.forEach((grant, index) => {
-                const deadline = grant.deadline ? ` | Дедлайн: ${grant.deadline}` : '';
+                const deadline = grant.deadline ? ` | Дедлайн: ${formatDeadline(grant.deadline)}` : '';
                 const category = grant.category ? ` | ${grant.category}` : '';
                 message += `${index + 1}. <${grant.url}|${grant.title}>${deadline}${category}\n`;
             });
@@ -31,11 +45,8 @@ async function sendWeeklyGrants() {
                 unfurl_media: false
             });
             
-            console.log('Weekly grants notification sent successfully');
+            console.log(`📧 Weekly report sent: ${newGrants.length} grants`);
         } else {
-            console.log('No new grants found for weekly report');
-            
-            // Відправляємо повідомлення про те, що нових грантів немає
             await app.client.chat.postMessage({
                 token: process.env.SLACK_BOT_TOKEN,
                 channel: process.env.SLACK_CHANNEL_ID,
@@ -43,9 +54,12 @@ async function sendWeeklyGrants() {
                 unfurl_links: false,
                 unfurl_media: false
             });
+            
+            console.log('📧 Weekly report sent: no new grants');
         }
     } catch (error) {
-        console.error('Error sending weekly grants to Slack:', error);
+        console.error('Error sending weekly grants to Slack:', error.message);
+        throw error;
     }
 }
 
@@ -164,7 +178,7 @@ async function buildGrantsView(category = 'all', page = 1, sortOrder = 'asc', hi
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": `🔗*<${grant.url}|${grant.title}>*\n*⏰Дедлайн:* ${grant.deadline || 'N/A'}\n*📦Категорія:* ${grant.category}`
+                    "text": `🔗*<${grant.url}|${grant.title}>*\n*⏰Дедлайн:* ${formatDeadline(grant.deadline)}\n*📦Категорія:* ${grant.category}`
                 }
             });
         });
@@ -245,7 +259,13 @@ app.command('/grants', async ({ ack, command, client }) => {
             unfurl_media: false
         });
     } catch (error) {
-        console.error(error);
+        console.error('Error in /grants command:', error.message);
+        await client.chat.postMessage({
+            channel: command.channel_id,
+            text: "❌ Помилка при отриманні грантів. Спробуйте пізніше.",
+            unfurl_links: false,
+            unfurl_media: false
+        });
     }
 });
 
@@ -263,7 +283,7 @@ const updateGrantsView = async ({ ack, body, client, action }) => {
             unfurl_media: false
         });
     } catch (error) {
-        console.error(error);
+        console.error('Error updating grants view:', error.message);
     }
 };
 
@@ -285,7 +305,7 @@ app.action('filter_by_category', async ({ ack, body, client, action }) => {
             unfurl_media: false
         });
     } catch (error) {
-        console.error(error);
+        console.error('Error filtering by category:', error.message);
     }
 });
 
@@ -304,7 +324,7 @@ app.action('sort_by_deadline', async ({ ack, body, client, action }) => {
             unfurl_media: false
         });
     } catch (error) {
-        console.error(error);
+        console.error('Error sorting by deadline:', error.message);
     }
 });
 
@@ -323,13 +343,18 @@ app.action('toggle_expired', async ({ ack, body, client, action }) => {
             unfurl_media: false
         });
     } catch (error) {
-        console.error(error);
+        console.error('Error toggling expired filter:', error.message);
     }
 });
 
 async function startSlackApp() {
-    await app.start(process.env.PORT || 3000);
-    console.log('⚡️ Bolt app is running!');
+    try {
+        await app.start(process.env.PORT || 3000);
+        console.log('⚡️ Slack bot started successfully!');
+    } catch (error) {
+        console.error('💥 Failed to start Slack bot:', error.message);
+        throw error;
+    }
 }
 
 module.exports = { sendWeeklyGrants, startSlackApp };

@@ -23,8 +23,16 @@ class EUScraper extends BaseScraper {
         const uniqueLinks = [...new Set(grantLinks)];
         console.log(`Found ${uniqueLinks.length} unique links on ${this.name}`);
 
+        // Filter out URLs that already exist in the database
+        const newLinks = await this._filterNewUrls(uniqueLinks.slice(0, 5));
+        
+        if (newLinks.length === 0) {
+            console.log(`✅ All URLs already exist in database for ${this.name}. Skipping content extraction.`);
+            return [];
+        }
+
         const grants = [];
-        for (const link of uniqueLinks.slice(0, 5)) {
+        for (const link of newLinks) {
             const grantData = await this._extractDataFromUrl(link);
             if (grantData) {
                 grants.push(grantData);

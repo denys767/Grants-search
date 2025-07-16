@@ -4,10 +4,16 @@
   "description": "Автоматизований пошук грантів з інтеграцією Slack-бота для фільтрації, категоризації та щотижневих звітів",
   "main": "src/main.js",
   "scripts": {
-    "start": "node src/main.js",
-    "setup-db": "node setup-database.js"
+    "start": "node src/main.js"
   },
-  "keywords": ["grants", "scraper", "slack-bot", "nodejs", "automation", "ukraine"],
+  "keywords": [
+    "grants",
+    "scraper",
+    "slack-bot",
+    "nodejs",
+    "automation",
+    "ukraine"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
