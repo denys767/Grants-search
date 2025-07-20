@@ -100,12 +100,22 @@ class OpportunityDeskScraper extends BaseScraper {
      * @returns {Promise<Array>} Array of processed grant data
      */
     async _processGrantsInBatches(grantLinks) {
+        // Filter out URLs that already exist in the database
+        const newLinks = await this._filterNewUrls(grantLinks);
+        
+        if (newLinks.length === 0) {
+            console.log(`✅ All URLs already exist in database for ${this.name}. Skipping content extraction.`);
+            return [];
+        }
+
+        console.log(`🔄 Processing ${newLinks.length} grants in batches of ${this.batchSize}`);
+        
         const grants = [];
         
-        for (let i = 0; i < grantLinks.length; i += this.batchSize) {
-            const batch = grantLinks.slice(i, i + this.batchSize);
+        for (let i = 0; i < newLinks.length; i += this.batchSize) {
+            const batch = newLinks.slice(i, i + this.batchSize);
             const batchNumber = Math.floor(i / this.batchSize) + 1;
-            const totalBatches = Math.ceil(grantLinks.length / this.batchSize);
+            const totalBatches = Math.ceil(newLinks.length / this.batchSize);
             
             console.log(`🔄 Processing batch ${batchNumber}/${totalBatches} (${batch.length} grants)`);
             
@@ -126,7 +136,7 @@ class OpportunityDeskScraper extends BaseScraper {
             console.log(`✅ Batch ${batchNumber} completed: ${validResults.length}/${batch.length} grants processed successfully`);
             
             // Add delay between batches (except for the last batch)
-            if (i + this.batchSize < grantLinks.length) {
+            if (i + this.batchSize < newLinks.length) {
                 console.log(`⏳ Waiting ${this.delayBetweenBatches}ms before next batch...`);
                 await this._delay(this.delayBetweenBatches);
             }
