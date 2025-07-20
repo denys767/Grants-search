@@ -3,11 +3,11 @@ const BaseScraper = require('./baseScraper');
 
 class GrantMarketScraper extends BaseScraper {
     constructor() {
-        super('Grant.Market', 'https://grant.market/opp');
-        this.maxLoadMoreClicks = parseInt(process.env.GRANT_MARKET_MAX_LOAD_MORE) || 20; // Safety limit for "load more" clicks
-        this.maxGrantsToProcess = parseInt(process.env.GRANT_MARKET_MAX_GRANTS) || 50; // Maximum grants to process per run
-        this.batchSize = parseInt(process.env.GRANT_MARKET_BATCH_SIZE) || 5; // Process 5 URLs in parallel
-        this.delayBetweenBatches = parseInt(process.env.GRANT_MARKET_BATCH_DELAY) || 1000; // 1 second delay between batches
+      super('Grant.Market', 'https://grant.market/opp');
+      this.maxLoadMoreClicks = parseInt(process.env.MAX_LOAD_MORE) || parseInt(process.env.MAX_PAGES) || 20;
+      this.maxGrantsToProcess = parseInt(process.env.MAX_GRANTS) || 50;
+      this.batchSize = parseInt(process.env.BATCH_SIZE) || 5;
+      this.delayBetweenBatches = parseInt(process.env.BATCH_DELAY) || 1000;
     }
 
     /**

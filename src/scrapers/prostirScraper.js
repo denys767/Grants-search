@@ -5,9 +5,10 @@ const { getExistingUrls } = require('../lib/db');
 class ProstirScraper extends BaseScraper {
     constructor() {
         super('Prostir', 'https://www.prostir.ua/category/grants/');
-        this.maxPages = 4; // Safety limit for pagination
-        this.batchSize = 5; // Process 3 URLs in parallel
-        this.delayBetweenBatches = 500; // 1 second delay between batches
+        this.maxPages = parseInt(process.env.MAX_PAGES) || 4;
+        this.maxGrantsToProcess = parseInt(process.env.MAX_GRANTS) || 50;
+        this.batchSize = parseInt(process.env.BATCH_SIZE) || 5;
+        this.delayBetweenBatches = parseInt(process.env.BATCH_DELAY) || 500;
     }
 
     /**
@@ -287,8 +288,15 @@ class ProstirScraper extends BaseScraper {
                 return [];
             }
             
+            // Apply max grants limit if specified
+            let urlsToProcess = newUrls;
+            if (this.maxGrantsToProcess > 0 && newUrls.length > this.maxGrantsToProcess) {
+                urlsToProcess = newUrls.slice(0, this.maxGrantsToProcess);
+                console.log(`🎯 Limiting processing to ${this.maxGrantsToProcess} grants (out of ${newUrls.length} new URLs)`);
+            }
+            
             // Step 4: Process only new grant links in parallel batches
-            const grants = await this._processUrlsInBatches(newUrls);
+            const grants = await this._processUrlsInBatches(urlsToProcess);
             
             console.log(`✅ ${this.name} scraping completed: ${grants.length} grants collected`);
             return grants;

@@ -53,10 +53,25 @@ async function saveGrants(grants) {
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
+        let savedCount = 0;
+        let skippedExpiredCount = 0;
+        
         for (const grant of grants) {
             if (!grant || !grant.url) continue;
             
             const deadlineDate = convertDeadlineToDate(grant.deadline);
+            
+            // Перевірка чи дедлайн не минув
+            if (deadlineDate) {
+                const today = new Date();
+                const deadline = new Date(deadlineDate);
+                
+                if (deadline < today) {
+                    console.log(`⚠️ Skipping expired grant: ${grant.title} (deadline: ${deadlineDate})`);
+                    skippedExpiredCount++;
+                    continue;
+                }
+            }
             
             const [rows] = await connection.execute('SELECT id FROM grants WHERE url = ?', [grant.url]);
             if (rows.length > 0) {
@@ -68,9 +83,10 @@ async function saveGrants(grants) {
                     [grant.title, grant.url, deadlineDate, grant.category]
                 );
             }
+            savedCount++;
         }
         await connection.commit();
-        console.log(`Successfully saved ${grants.length} grants.`);
+        console.log(`✅ Successfully saved ${savedCount} grants. Skipped ${skippedExpiredCount} expired grants.`);
     } catch (error) {
         await connection.rollback();
         console.error('Error saving grants to DB:', error);
@@ -341,6 +357,34 @@ async function getWeeklyGrants() {
     }
 }
 
+async function cleanupExpiredGrants() {
+    const connection = await pool.getConnection();
+    try {
+        // Видаляємо гранти з минулим дедлайном
+        const query = `
+            DELETE FROM grants 
+            WHERE deadline IS NOT NULL 
+            AND deadline < CURDATE()
+        `;
+        
+        const [result] = await connection.execute(query);
+        const deletedCount = result.affectedRows;
+        
+        if (deletedCount > 0) {
+            console.log(`🗑️ Cleaned up ${deletedCount} expired grants from database`);
+        } else {
+            console.log(`✅ No expired grants found to clean up`);
+        }
+        
+        return deletedCount;
+    } catch (error) {
+        console.error('Error cleaning up expired grants:', error.message);
+        throw error;
+    } finally {
+        connection.release();
+    }
+}
+
 module.exports = { 
     saveGrants, 
     setupDatabase, 
@@ -350,5 +394,6 @@ module.exports = {
     getExistingUrls, 
     saveRejectedGrant, 
     getRejectedUrls,
-    getRejectedGrants
+    getRejectedGrants,
+    cleanupExpiredGrants
 };

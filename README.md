@@ -119,7 +119,7 @@ npm run setup-db
 
 2. **Запустіть ngrok в окремому терміналі:**
    ```bash
-   ngrok http 3000
+   ngrok http --url=ваш-лінк.ngrok-free.app 3000
    ```
 
 3. **Скопіюйте HTTPS URL** (наприклад, `https://abc123.ngrok-free.app`) та оновіть налаштування Slack-додатку
@@ -389,9 +389,8 @@ console.log(rejected);
 ngrok config add-authtoken YOUR_AUTHTOKEN
 
 # Запустіть тунель:
-ngrok http 3000
-
-# Скопіюйте HTTPS URL та оновіть налаштування Slack
+ngrok http --url=ваш-лінк.ngrok-free.app 3000
+# Дефолтний порт Slack - 3000
 ```
 
 ### Slack-бот не відповідає на команди

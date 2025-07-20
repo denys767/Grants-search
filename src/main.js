@@ -18,10 +18,10 @@ const CONFIG = {
 };
 
 const sources = [
-    // gurtScraper,
-   // prostirScraper,
-    grantMarketScraper
-    // euScraper,
+    // gurtScraper
+    // prostirScraper,
+    // grantMarketScraper 
+     euScraper
     // opportunityDeskScraper
 ];
 
@@ -31,6 +31,10 @@ async function scrapeAll() {
     try {
         // Ensure database table exists
         await setupDatabase();
+        
+        // Clean up expired grants before scraping
+        const { cleanupExpiredGrants } = require('./lib/db');
+        await cleanupExpiredGrants();
         
         const allGrants = [];
         let successCount = 0;
@@ -87,7 +91,13 @@ async function scrapeAll() {
 
 async function handleWeeklyReport() {
     try {
-        console.log('📧 Sending weekly grants report...');
+        console.log('📧 Preparing weekly grants report...');
+        
+        // Спочатку видаляємо застарілі гранти
+        const { cleanupExpiredGrants } = require('./lib/db');
+        await cleanupExpiredGrants();
+        
+        // Потім відправляємо звіт
         await sendWeeklyGrants();
         console.log('✅ Weekly report sent successfully');
     } catch (error) {

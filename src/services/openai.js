@@ -8,7 +8,8 @@ const CONFIG = {
     RETRY_COUNT: 3,
     RETRY_DELAY: 1000,
    // TEMPERATURE: 0.2,
-    MODEL: 'gpt-4.1-mini',
+    MODEL: 'gpt-4o-mini',
+    // MODEL: 'gpt-4.1-mini',
     DEBUG_LOGGING: process.env.DEBUG_AI_EXTRACTION === 'true' // Set to true in .env for deadline debugging
 };
 
