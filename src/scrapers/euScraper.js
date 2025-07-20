@@ -101,7 +101,7 @@ class EUScraper extends BaseScraper {
                 
                 // Add delay between pages
                 console.log('⏳ Waiting before next page...');
-                await page.waitForTimeout(3000);
+                await page.waitForTimeout(2000);
             }
         } catch (error) {
             console.error(`❌ Error during EU Portal scraping:`, error.message);
