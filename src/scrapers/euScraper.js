@@ -8,6 +8,7 @@ class EUScraper extends BaseScraper {
         this.maxGrantsToProcess = parseInt(process.env.MAX_GRANTS) || 50;
         this.batchSize = parseInt(process.env.BATCH_SIZE) || 5;
         this.delayBetweenBatches = parseInt(process.env.BATCH_DELAY) || 1000;
+        this.euContentWaitTime = parseInt(process.env.EU_CONTENT_WAIT_TIME) || 6000;
     }
 
     async scrape() {
@@ -55,7 +56,7 @@ class EUScraper extends BaseScraper {
                             spinner.style.display === 'none' || 
                             !spinner.offsetParent
                         );
-                    }, { timeout: 15000 });
+                    }, { timeout: 4000 });
                     
                     // Additional wait to ensure content is stable
                     await page.waitForTimeout(2000);
@@ -128,7 +129,7 @@ class EUScraper extends BaseScraper {
 
         console.log(`🔄 Processing ${newLinks.length} grants in batches of ${this.batchSize}`);
         
-        // Process grants in batches using the base scraper's method
+        // Process grants in batches using the specialized EU extraction method
         const grants = [];
         for (let i = 0; i < newLinks.length; i += this.batchSize) {
             const batch = newLinks.slice(i, i + this.batchSize);
@@ -137,10 +138,10 @@ class EUScraper extends BaseScraper {
             
             console.log(`🔄 Processing batch ${batchNumber}/${totalBatches} (${batch.length} grants)`);
             
-            // Process batch in parallel
+            // Process batch in parallel using specialized EU extraction
             const batchPromises = batch.map(async (link) => {
                 try {
-                    return await this._extractDataFromUrl(link);
+                    return await this._extractDataFromUrlWithPlaywright(link);
                 } catch (error) {
                     console.error(`❌ Error processing grant ${link}:`, error.message);
                     return null;
@@ -161,6 +162,142 @@ class EUScraper extends BaseScraper {
         }
         
         return grants;
+    }
+
+    /**
+     * Custom extraction method for EU Portal that handles dynamic content loading
+     * @param {string} url - The URL to extract data from
+     * @returns {Promise<Object|null>} - The extracted grant data or null
+     */
+    async _extractDataFromUrlWithPlaywright(url) {
+        const browser = await chromium.launch({ 
+            headless: true,
+            timeout: 60000
+        });
+        const context = await browser.newContext({
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        });
+        const page = await context.newPage();
+        
+        try {
+            console.log(`🔍 Extracting data from EU Portal: ${url}`);
+            
+            // Navigate to the grant page
+            await page.goto(url, { 
+                waitUntil: 'networkidle',
+                timeout: 60000 
+            });
+            
+            // Wait for initial content to load (EU Portal specific timing)
+            console.log('⏳ Waiting for EU Portal content to load...');
+            await page.waitForTimeout(this.euContentWaitTime);
+            
+            // Wait for basic page structure to appear
+            try {
+                // Wait for main content elements to load
+                await page.waitForSelector('main, .main-content, [role="main"]', { timeout: 5000 });
+            } catch (error) {
+                console.log(`⚠️  Main content selector not found for ${url}, proceeding anyway`);
+            }
+            
+            // Extract the page content after it has loaded
+            const content = await page.content();
+            
+            // Use the parent class's content processing but with our loaded content
+            return await this._processExtractedContent(content, url);
+            
+        } catch (error) {
+            console.error(`❌ Error extracting data from EU Portal ${url}:`, error.message);
+            return null;
+        } finally {
+            await browser.close();
+        }
+    }
+
+    /**
+     * Process the extracted content using the base scraper's logic
+     * @param {string} content - HTML content
+     * @param {string} url - The original URL
+     * @returns {Promise<Object|null>} - The processed grant data
+     */
+    async _processExtractedContent(content, url) {
+        const cheerio = require('cheerio');
+        const { saveRejectedGrant } = require('../lib/db');
+        const openai = require('../services/openai');
+        
+        try {
+            const $ = cheerio.load(content);
+
+            // EU Portal specific content selectors
+            const contentSelectors = [
+                'main',
+                '.main-content',
+                '[role="main"]',
+                '.content',
+                'article',
+                '.post-content',
+                '.entry-content',
+                '#content',
+                'body'
+            ];
+            
+            let articleText = '';
+            for (const selector of contentSelectors) {
+                const text = $(selector).text().trim();
+                if (text && text.length > 100) { // Ensure meaningful content
+                    articleText = text;
+                    break;
+                }
+            }
+
+            if (!articleText) {
+                // Save to rejected grants table
+                await saveRejectedGrant(url, null, 'no_meaningful_content');
+                throw new Error('No meaningful content found on the page');
+            }
+
+            // Limit text length to avoid OpenAI token limits
+            const maxTextLength = 20000;
+            if (articleText.length > maxTextLength) {
+                articleText = articleText.substring(0, maxTextLength) + '...';
+            }
+
+            console.log(`📄 Extracted text length: ${articleText.length} characters`);
+
+            // Extract data using OpenAI with retry mechanism
+            const maxRetries = 3;
+            let lastError;
+            
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    const grantInfo = await openai.extractGrantInfo(articleText, url);
+                    
+                    if (grantInfo && grantInfo.title && grantInfo.title.trim()) {
+                        console.log(`✅ Successfully extracted grant info for ${url}`);
+                        return grantInfo;
+                    } else {
+                        throw new Error('Invalid response: missing or invalid title');
+                    }
+                } catch (error) {
+                    lastError = error;
+                    console.log(`⚠️ Attempt ${attempt}/${maxRetries} failed for ${url}: ${error.message}`);
+                    
+                    if (attempt < maxRetries) {
+                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                    }
+                }
+            }
+
+            // If all attempts failed, save to rejected grants
+            await saveRejectedGrant(url, articleText, `extraction_failed: ${lastError.message}`);
+            console.log(`Failed to extract grant info from ${url} after ${maxRetries} attempts: ${lastError.message}`);
+            console.log(`⚠️ No grant info extracted from ${url}`);
+            return null;
+
+        } catch (error) {
+            console.error(`❌ Error processing content for ${url}:`, error.message);
+            return null;
+        }
     }
 }
 

@@ -18,11 +18,11 @@ const CONFIG = {
 };
 
 const sources = [
-    // gurtScraper
-    // prostirScraper,
-    // grantMarketScraper 
-     euScraper
-    // opportunityDeskScraper
+    gurtScraper,
+    prostirScraper,
+    grantMarketScraper,
+    euScraper,
+    opportunityDeskScraper
 ];
 
 async function scrapeAll() {
