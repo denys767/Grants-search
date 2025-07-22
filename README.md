@@ -66,6 +66,8 @@
 1. Встановіть та налаштуйте базу даних MySQL
 [Гайд для встановлення на Debian-подібні системи](https://dev.mysql.com/doc/refman/8.4/en/linux-installation-apt-repo.html)
 
+Таблиці створюються автоматично при першому запуску програми.
+
 ### Налаштування OpenAI API
 1. **Додайте гроші на акаунт та отримайте API ключ:**
    - Перейдіть на [OpenAI API](https://platform.openai.com/signup)
