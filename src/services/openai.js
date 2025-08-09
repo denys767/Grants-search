@@ -4,12 +4,11 @@ const { saveRejectedGrant } = require('../lib/db');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 const CONFIG = {
-  MAX_TEXT_LENGTH: 20000,
+  MAX_TEXT_LENGTH: 10000,
   RETRY_COUNT: 3,
   RETRY_DELAY: 1000,
   // TEMPERATURE: 0.2,
-  MODEL: 'gpt-4.1-mini'
-  // MODEL: 'gpt-4.1-mini'
+  MODEL: 'gpt-5-nano'
 };
 
 const categories = [
