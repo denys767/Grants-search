@@ -56,19 +56,32 @@ async function saveGrants(grants) {
         let savedCount = 0;
         let skippedExpiredCount = 0;
         
+        const SOON_DAYS_THRESHOLD = 10; // Менше ніж за 10 днів переносимо в rejected
+
         for (const grant of grants) {
             if (!grant || !grant.url) continue;
             
             const deadlineDate = convertDeadlineToDate(grant.deadline);
             
-            // Перевірка чи дедлайн не минув
+            // Перевірка дедлайну: прострочені та ті що менш ніж за 10 днів заносимо у rejected_grants
             if (deadlineDate) {
                 const today = new Date();
+                today.setHours(0,0,0,0);
                 const deadline = new Date(deadlineDate);
-                
-                if (deadline < today) {
-                    console.log(`⚠️ Skipping expired grant: ${grant.title} (deadline: ${deadlineDate})`);
+                deadline.setHours(0,0,0,0);
+                const diffMs = deadline - today; // може бути від'ємним
+                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+                if (diffDays < 0) {
+                    // Прострочений
+                    console.log(`⚠️ Moving expired grant to rejected: ${grant.title} (deadline: ${deadlineDate})`);
                     skippedExpiredCount++;
+                    await saveRejectedGrant(grant.url, grant.title || null, 'expired_deadline');
+                    continue;
+                } else if (diffDays < SOON_DAYS_THRESHOLD) {
+                    console.log(`⚠️ Moving soon-expiring (<${SOON_DAYS_THRESHOLD}d) grant to rejected: ${grant.title} (deadline: ${deadlineDate}, in ${diffDays}d)`);
+                    skippedExpiredCount++;
+                    await saveRejectedGrant(grant.url, grant.title || null, `deadline_less_than_${SOON_DAYS_THRESHOLD}_days`);
                     continue;
                 }
             }
@@ -86,7 +99,7 @@ async function saveGrants(grants) {
             savedCount++;
         }
         await connection.commit();
-        console.log(`✅ Successfully saved ${savedCount} grants. Skipped ${skippedExpiredCount} expired grants.`);
+    console.log(`✅ Successfully saved ${savedCount} grants. Skipped (expired/soon) ${skippedExpiredCount} grants.`);
     } catch (error) {
         await connection.rollback();
         console.error('Error saving grants to DB:', error);
@@ -168,7 +181,9 @@ async function getGrants({ category = null, page = null, limit = null, sortOrder
         
         // Hide expired grants filter
         if (hideExpired) {
-            conditions.push('(deadline IS NULL OR deadline >= CURDATE())');
+            // Приховуємо дедлайни що вже минули або настануть менш ніж за 10 днів
+            // Показуємо тільки ті що безстрокові або дедлайн >= сьогодні + 10 днів
+            conditions.push('(deadline IS NULL OR deadline >= DATE_ADD(CURDATE(), INTERVAL 10 DAY))');
         }
         
         if (conditions.length > 0) {

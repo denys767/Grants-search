@@ -145,14 +145,14 @@ async function buildGrantsView(category = 'all', page = 1, sortOrder = 'asc', hi
                     "action_id": "toggle_expired",
                     "options": [
                         {
-                            "text": { "type": "plain_text", "text": "Приховати прострочені гранти" },
+                            "text": { "type": "plain_text", "text": "Приховати прострочені та <10 днів" },
                             "value": "hide_expired"
                         }
                     ],
                     ...(hideExpired && {
                         "initial_options": [
                             {
-                                "text": { "type": "plain_text", "text": "Приховати прострочені гранти" },
+                                "text": { "type": "plain_text", "text": "Приховати прострочені та <10 днів" },
                                 "value": "hide_expired"
                             }
                         ]
@@ -338,7 +338,7 @@ app.action('toggle_expired', async ({ ack, body, client, action }) => {
             channel: body.channel.id,
             ts: body.message.ts,
             blocks: view.blocks,
-            text: newHideExpired ? "Прострочені гранти приховані" : "Показано всі гранти",
+            text: newHideExpired ? "Прострочені та ті що <10 днів гранти приховані" : "Показано всі гранти",
             unfurl_links: false,
             unfurl_media: false
         });
