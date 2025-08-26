@@ -47,10 +47,11 @@ function convertDeadlineToDate(deadlineStr) {
 async function saveGrants(grants) {
     if (!grants || grants.length === 0) {
         console.log("No new grants to save.");
-        return;
+        return [];
     }
 
     const connection = await pool.getConnection();
+    const newlyInserted = [];
     try {
         await connection.beginTransaction();
         let savedCount = 0;
@@ -88,18 +89,29 @@ async function saveGrants(grants) {
             
             const [rows] = await connection.execute('SELECT id FROM grants WHERE url = ?', [grant.url]);
             if (rows.length > 0) {
-                await connection.execute('UPDATE grants SET title = ?, deadline = ?, category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
-                [grant.title, deadlineDate, grant.category, rows[0].id]);
+                // Existing grant -> update
+                await connection.execute(
+                    'UPDATE grants SET title = ?, deadline = ?, category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
+                    [grant.title, deadlineDate, grant.category, rows[0].id]
+                );
             } else {
+                // New grant -> insert & track for immediate notification
                 await connection.execute(
                     'INSERT INTO grants (title, url, deadline, category) VALUES (?, ?, ?, ?)',
                     [grant.title, grant.url, deadlineDate, grant.category]
                 );
+                newlyInserted.push({
+                    title: grant.title,
+                    url: grant.url,
+                    deadline: deadlineDate,
+                    category: grant.category
+                });
             }
             savedCount++;
         }
         await connection.commit();
-    console.log(`✅ Successfully saved ${savedCount} grants. Skipped (expired/soon) ${skippedExpiredCount} grants.`);
+        console.log(`✅ Successfully saved ${savedCount} grants. Skipped (expired/soon) ${skippedExpiredCount} grants. New inserts: ${newlyInserted.length}`);
+        return newlyInserted;
     } catch (error) {
         await connection.rollback();
         console.error('Error saving grants to DB:', error);

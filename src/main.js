@@ -7,7 +7,7 @@ const grantMarketScraper = require('./scrapers/grantMarketScraper');
 const euScraper = require('./scrapers/euScraper');
 const opportunityDeskScraper = require('./scrapers/opportunityDeskScraper');
 const { saveGrants, setupDatabase } = require('./lib/db');
-const { sendWeeklyGrants, startSlackApp } = require('./services/slack');
+const { sendWeeklyGrants, startSlackApp, sendImmediateNewGrants } = require('./services/slack');
 
 // Configuration
 const CONFIG = {
@@ -62,15 +62,16 @@ async function scrapeAll() {
             }
         }
 
+        let newlyInserted = [];
         if (allGrants.length > 0) {
-            await saveGrants(allGrants);
-            console.log(`💾 Saved ${allGrants.length} grants to database`);
+            newlyInserted = await saveGrants(allGrants);
+            console.log(`💾 Processed ${allGrants.length} scraped grants (new: ${newlyInserted.length})`);
         } else {
-            console.log('ℹ️  No new grants found to save');
+            console.log('ℹ️  No grants scraped to process');
         }
         
         console.log(`📊 Scraping completed. Success: ${successCount}/${sources.length}, Errors: ${errorCount}`);
-        return allGrants;
+        return { allGrants, newlyInserted };
     } catch (error) {
         console.error('💥 Critical error during scraping:', error.message);
         throw error;
@@ -105,19 +106,16 @@ async function handleWeeklyReport() {
     }
 }
 
-// Schedule scraping every Monday at 8 AM
+// Single combined weekly job: scrape then immediately announce new grants, then (optionally) weekly summary
 if (CONFIG.SCHEDULED_SCRAPING_ENABLED) {
     cron.schedule('0 8 * * 1', async () => {
-        console.log('⏰ Running scheduled weekly grant scraping...');
-        await scrapeAll();
-    });
-}
-
-// Schedule weekly report every Monday at 9 AM (after scraping)
-if (CONFIG.SCHEDULED_REPORTS_ENABLED) {
-    cron.schedule('0 9 * * 1', async () => {
-        console.log('⏰ Running scheduled weekly report...');
-        await handleWeeklyReport();
+        console.log('⏰ Running scheduled weekly scraping & immediate notification...');
+        const { newlyInserted } = await scrapeAll();
+        await sendImmediateNewGrants(newlyInserted);
+        if (CONFIG.SCHEDULED_REPORTS_ENABLED) {
+            console.log('🧾 Sending weekly aggregated report after immediate notification...');
+            await handleWeeklyReport();
+        }
     });
 }
 
@@ -146,9 +144,9 @@ if (CONFIG.RUN_SCRAPING_ON_STARTUP || CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP) {
         try {
             if (CONFIG.RUN_SCRAPING_ON_STARTUP) {
                 console.log('🚀 Starting scraping on startup...');
-                await scrapeAll();
+                const { newlyInserted } = await scrapeAll();
+                await sendImmediateNewGrants(newlyInserted);
             }
-            
             if (CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP) {
                 console.log('📧 Starting weekly report on startup...');
                 await handleWeeklyReport();

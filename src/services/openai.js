@@ -7,30 +7,70 @@ const CONFIG = {
   MAX_TEXT_LENGTH: 10000,
   RETRY_COUNT: 3,
   RETRY_DELAY: 1000,
-  // TEMPERATURE: 0.2,
+  TEMPERATURE: 1,
   MODEL: 'gpt-5-nano'
 };
 
 const categories = [
-  'освіта', 'стартапи', 'підтримка ветеранів', 'підприємництво',
-  'бізнес-школи', 'корпоративне навчання', 'програми для жінок',
-  'лідерство й резильєнтність', 'фінанси й інвестиції', 'HR',
-  'інвестиційні проєкти'
+  'Освіта',
+  'Стартапи',
+  'Підтримка ветеранів',
+  'Навчання підприємництву',
+  'Вища освіта у менеджменті',
+  'Корпоративне навчання',
+  'Навчання жінок',
+  'Лідерство та резильєнтність',
+  'Фінанси та інвестиції',
+  'Управління персоналом',
+  'Інвестиційні проєкти'
 ];
 
-// const keywords = {
-//     'освіта': ['higher education funding', 'education grants', 'capacity building', 'professional development', 'business education', 'executive education', 'фінансування вищої освіти', 'освітні гранти', 'нарощування потенціалу', 'професійний розвиток', 'бізнес-освіта', 'управлінська освіта'],
-//     'стартапи': ['startup grants', 'business acceleration', 'business incubation', 'incubator', 'innovations', 'incubator funding', 'гранти для стартапів', 'бізнес-акселерація', 'бізнес-інкубація', 'інкубатор', 'інновації', 'фінансування інкубаторів'],
-//     'підтримка ветеранів': ['veteran entrepreneurship', 'veteran education', 'veteran business grants', 'reintegration programs', 'підприємництво ветеранів', 'освіта для ветеранів', 'бізнес-гранти для ветеранів', 'програми реінтеграції'],
-//     'навчання підприємництву': ['entrepreneurship training', 'SME support', 'business incubation', 'business resilience programs', 'тренінги з підприємництва', 'підтримка МСП', 'бізнес-інкубація', 'програми бізнес-резильєнтності'],
-//     'бізнес-школи': ['management education', 'business school funding', 'research grants in management', 'doctoral education funding', 'MBA', 'DBA', 'освіта в галузі менеджменту', 'фінансування бізнес-шкіл', 'гранти на дослідження у сфері менеджменту', 'фінансування докторських програм', 'MBA', 'DBA'],
-//     'корпоративне навчання': ['corporate training', 'workforce upskilling', 'lifelong learning', 'l&d', 'корпоративне навчання', 'підвищення кваліфікації працівників', 'навчання впродовж життя', 'навчання та розвиток (L&D)'],
-//     'програми для жінок': ['women entrepreneurship', 'women leadership programs', 'gender equity in business', 'жіноче підприємництво', 'програми жіночого лідерства', 'гендерна рівність у бізнесі'],
-//     'лідерство й резильєєнтність': ['leadership development', 'resilience training', 'adaptive leadership programs', 'business leadership', 'business resilience', 'розвиток лідерства', 'тренінги з резильєнтності', 'адаптивне лідерство', 'бізнес-лідерство', 'стійкість бізнесу'],
-//     'фінанси й інвестиції': ['financial literacy programs', 'investment readiness', 'impact investment', 'economic empowerment', 'програми фінансової грамотності', 'готовність до інвестування', 'впливові інвестиції', 'економічне розширення можливостей'],
-//     'HR': ['human capital development', 'HR management training', 'talent management grants', 'розвиток людського капіталу', 'навчання з управління персоналом', 'гранти на управління талантами'],
-//     'інвестиційні проєкти': ['investment funding', 'business scaling grants', 'international cooperation in finance', 'фінансування інвестицій', 'гранти на масштабування бізнесу', 'міжнародне співробітництво у фінансах']
-// };
+const keywords = {
+  'Освіта': [
+    'higher education funding', 'education grants', 'capacity building', 'professional development', 'business education', 'executive education',
+    'фінансування вищої освіти', 'освітні гранти', 'нарощування потенціалу', 'професійний розвиток', 'бізнес-освіта', 'управлінська освіта'
+  ],
+  'Стартапи': [
+    'startup grants', 'business acceleration', 'business incubation', 'incubator', 'innovations', 'incubator funding',
+    'гранти для стартапів', 'бізнес-акселерація', 'бізнес-інкубація', 'інкубатор', 'інновації', 'фінансування інкубаторів'
+  ],
+  'Підтримка ветеранів': [
+    'veteran entrepreneurship', 'veteran education', 'veteran business grants', 'reintegration programs',
+    'підприємництво ветеранів', 'освіта для ветеранів', 'бізнес-гранти для ветеранів', 'програми реінтеграції'
+  ],
+  'Навчання підприємництву': [
+    'entrepreneurship training', 'SME support', 'business incubation', 'business resilience programs',
+    'тренінги з підприємництва', 'підтримка МСП', 'бізнес-інкубація', 'програми бізнес-резильєнтності'
+  ],
+  'Вища освіта у менеджменті': [
+    'management education', 'business school funding', 'research grants in management', 'doctoral education funding', 'MBA', 'DBA',
+    'освіта в галузі менеджменту', 'фінансування бізнес-шкіл', 'гранти на дослідження у сфері менеджменту', 'фінансування докторських програм', 'MBA', 'DBA'
+  ],
+  'Корпоративне навчання': [
+    'corporate training', 'workforce upskilling', 'lifelong learning', 'l&d',
+    'корпоративне навчання', 'підвищення кваліфікації працівників', 'навчання впродовж життя', 'навчання та розвиток (L&D)'
+  ],
+  'Навчання жінок': [
+    'women entrepreneurship', 'women leadership programs', 'gender equity in business',
+    'жіноче підприємництво', 'програми жіночого лідерства', 'гендерна рівність у бізнесі'
+  ],
+  'Лідерство та резильєнтність': [
+    'leadership development', 'resilience training', 'adaptive leadership programs', 'business leadership', 'business resilience',
+    'розвиток лідерства', 'тренінги з резильєнтності', 'адаптивне лідерство', 'бізнес-лідерство', 'стійкість бізнесу'
+  ],
+  'Фінанси та інвестиції': [
+    'financial literacy programs', 'investment readiness', 'impact investment', 'economic empowerment',
+    'програми фінансової грамотності', 'готовність до інвестування', 'впливові інвестиції', 'економічне розширення можливостей'
+  ],
+  'Управління персоналом': [
+    'human capital development', 'HR management training', 'talent management grants',
+    'розвиток людського капіталу', 'навчання з управління персоналом', 'гранти на управління талантами'
+  ],
+  'Інвестиційні проєкти': [
+    'investment funding', 'business scaling grants', 'international cooperation in finance',
+    'фінансування інвестицій', 'гранти на масштабування бізнесу', 'міжнародне співробітництво у фінансах'
+  ]
+};
 
 async function extractGrantInfo(text, url) {
   // Validate inputs
@@ -50,8 +90,11 @@ async function extractGrantInfo(text, url) {
 
 Поля:
 1. title - назва можливості
-2. deadline - дата у форматі DD-MM-YYYY (null якщо безстроковий або . Якщо в тексті єдина дата, то її поверни)
-3. category - одна з: ${categories.join(', ')} (null якщо не підходить. Не вигадуй нові категорії. Також став null, коли грант менше 20k$ або коли грант адресовано малим/середнім підприємствам для розвитку власного бізнесу)
+2. deadline - дата у форматі DD-MM-YYYY (null якщо безстроковий). Якщо в тексті єдина дата, то її поверни.
+3. category - одна з: ${categories.join(', ')} (null якщо не підходить. Не вигадуй нові категорії. Також став null, коли грант менше 20k$ або коли грант адресовано малим/середнім підприємствам для розвитку власного бізнесу. Став null, якщо грант адресований одній людині)
+
+Ключові слова для категорій (англ/укр):
+${JSON.stringify(keywords, null, 2)}
 
 Відповідь JSON: {"title": "назва", "deadline": "31-12-2024", "category": "категорія"}
 
