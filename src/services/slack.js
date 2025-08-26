@@ -71,7 +71,7 @@ async function sendImmediateNewGrants(newGrants) {
             return;
         }
 
-        let message = `🆕 *Нові гранти (${newGrants.length}) отримані зі скрейпінгу:*
+        let message = `*Нові гранти (${newGrants.length}) отримані з пошуку:*
 \n`;
         newGrants.forEach((grant, idx) => {
             const deadline = grant.deadline ? ` | Дедлайн: ${formatDeadline(grant.deadline)}` : '';
