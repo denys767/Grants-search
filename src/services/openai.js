@@ -8,7 +8,7 @@ const CONFIG = {
   RETRY_COUNT: 3,
   RETRY_DELAY: 1000,
   TEMPERATURE: 1,
-  MODEL: 'gpt-5-nano'
+  MODEL: 'gpt-5-mini'
 };
 
 const categories = [
@@ -86,22 +86,19 @@ async function extractGrantInfo(text, url) {
 
 
   const prompt = `
-Витягни інформацію про грант з тексту:
+Витягни з тексту:
+- title: назва
+- deadline: DD-MM-YYYY або null
+- category: одна з ${categories.join(', ')}
 
-Поля:
-1. title - назва можливості
-2. deadline - дата у форматі DD-MM-YYYY (null якщо безстроковий). Якщо в тексті єдина дата, то її поверни.
-3. category - одна з: ${categories.join(', ')} (null якщо не підходить. Не вигадуй нові категорії.)
-Став null на категорію, якщо виконуються одна або більше таких умов:
-- Грант менше 20k$
-- Грант адресовано малим, середнім підприємствам для розвитку власного бізнесу
-- Грант адресовано персонально (стипендії, гранти на навчання тощо)
-НЕ ЗБИРАЙ ГРАНТИ ДЛЯ МСП, ПОТРІБНІ ГРАНТИ ДЛЯ ВЕЛИКИХ КОМПАНІЙ
+Встанови null крім title, якщо:
+- Грант <20k$
+- Для МСП/малого бізнесу
+- Стипендії для учнів
 
-Ключові слова для категорій (англ/укр):
-${JSON.stringify(keywords, null, 2)}
+Потрібні гранти, які цікавлять великі компанії.
 
-Відповідь JSON: {"title": "назва", "deadline": "31-12-2024", "category": "категорія"}
+JSON: {"title": "назва", "deadline": "31-12-2024", "category": "категорія"}
 
 Текст: "${truncatedText}"
 `;
@@ -118,8 +115,8 @@ ${JSON.stringify(keywords, null, 2)}
         temperature: CONFIG.TEMPERATURE,
       }, {
         headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+          // 'Content-Type': 'application/json'
         },
         timeout: 30000 // 30 seconds timeout
       });

@@ -18,11 +18,11 @@ const CONFIG = {
 };
 
 const sources = [
-    gurtScraper,
-    prostirScraper,
-    grantMarketScraper,
-    euScraper,
-    opportunityDeskScraper
+     gurtScraper,
+     prostirScraper,
+     grantMarketScraper,
+     euScraper,
+     opportunityDeskScraper
 ];
 
 async function scrapeAll() {
@@ -106,15 +106,16 @@ async function handleWeeklyReport() {
     }
 }
 
-// Single combined weekly job: scrape then immediately announce new grants, then (optionally) weekly summary
+// Schedule scraping every Monday at 8 AM and send report for newly found grants
 if (CONFIG.SCHEDULED_SCRAPING_ENABLED) {
     cron.schedule('0 8 * * 1', async () => {
-        console.log('⏰ Running scheduled weekly scraping & immediate notification...');
+        console.log('⏰ Running scheduled weekly grant scraping...');
         const { newlyInserted } = await scrapeAll();
-        await sendImmediateNewGrants(newlyInserted);
-        if (CONFIG.SCHEDULED_REPORTS_ENABLED) {
-            console.log('🧾 Sending weekly aggregated report after immediate notification...');
-            await handleWeeklyReport();
+        if (newlyInserted.length > 0) {
+            console.log('📧 Sending report for newly found grants...');
+            await sendWeeklyGrants(newlyInserted);
+        } else {
+            console.log('📧 No new grants found, skipping report');
         }
     });
 }
@@ -141,13 +142,17 @@ if (CONFIG.RUN_SCRAPING_ON_STARTUP || CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP) {
     console.log('🔄 Running startup tasks...');
     
     (async () => {
+        let scrapingDone = false;
         try {
             if (CONFIG.RUN_SCRAPING_ON_STARTUP) {
                 console.log('🚀 Starting scraping on startup...');
                 const { newlyInserted } = await scrapeAll();
-                await sendImmediateNewGrants(newlyInserted);
+                if (newlyInserted.length > 0) {
+                    await sendWeeklyGrants(newlyInserted);
+                }
+                scrapingDone = true;
             }
-            if (CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP) {
+            if (CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP && !scrapingDone) {
                 console.log('📧 Starting weekly report on startup...');
                 await handleWeeklyReport();
             }
@@ -159,5 +164,4 @@ if (CONFIG.RUN_SCRAPING_ON_STARTUP || CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP) {
 
 console.log('🎯 Grant Scraper application started successfully');
 
-// Export functions for testing
 module.exports = { scrapeAll, handleWeeklyReport };

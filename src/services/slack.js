@@ -23,12 +23,17 @@ const app = new App({
     signingSecret: process.env.SLACK_SIGNING_SECRET
 });
 
-async function sendWeeklyGrants() {
+async function sendWeeklyGrants(grants = null) {
     try {
-        const newGrants = await getWeeklyGrants();
+        let newGrants;
+        if (grants) {
+            newGrants = grants;
+        } else {
+            newGrants = await getWeeklyGrants();
+        }
         
         if (newGrants.length > 0) {
-            let message = `📊 *Звіт за тиждень*\nЗнайдено ${newGrants.length} нових грантів:\n\n`;
+            let message = `📊 *Нові гранти знайдені під час останнього пошуку*\nЗнайдено ${newGrants.length} нових грантів:\n\n`;
             newGrants.forEach((grant, index) => {
                 const deadline = grant.deadline ? ` | Дедлайн: ${formatDeadline(grant.deadline)}` : '';
                 const category = grant.category ? ` | ${grant.category}` : '';
@@ -45,20 +50,12 @@ async function sendWeeklyGrants() {
                 unfurl_media: false
             });
             
-            console.log(`📧 Weekly report sent: ${newGrants.length} grants`);
+            console.log(`📧 Report sent: ${newGrants.length} grants`);
         } else {
-            await app.client.chat.postMessage({
-                token: process.env.SLACK_BOT_TOKEN,
-                channel: process.env.SLACK_CHANNEL_ID,
-                text: "📊 *Звіт за тиждень*\nНових грантів за останній тиждень не знайдено.\n\n💡 Використовуйте `/grants` для перегляду всіх доступних грантів",
-                unfurl_links: false,
-                unfurl_media: false
-            });
-            
-            console.log('📧 Weekly report sent: no new grants');
+            console.log('📧 No new grants to report');
         }
     } catch (error) {
-        console.error('Error sending weekly grants to Slack:', error.message);
+        console.error('Error sending grants report to Slack:', error.message);
         throw error;
     }
 }
@@ -387,4 +384,4 @@ async function startSlackApp() {
     }
 }
 
-module.exports = { sendWeeklyGrants, startSlackApp, sendImmediateNewGrants };
+module.exports = { sendWeeklyGrants, startSlackApp };
