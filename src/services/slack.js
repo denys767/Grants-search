@@ -60,35 +60,35 @@ async function sendWeeklyGrants(grants = null) {
     }
 }
 
-// Send newly found grants right after scraping (list of raw grant objects that were just inserted)
-async function sendImmediateNewGrants(newGrants) {
-    try {
-        if (!newGrants || newGrants.length === 0) {
-            console.log('📭 No freshly inserted grants to announce.');
-            return;
-        }
+// // Send newly found grants right after scraping (list of raw grant objects that were just inserted)
+// async function sendImmediateNewGrants(newGrants) {
+//     try {
+//         if (!newGrants || newGrants.length === 0) {
+//             console.log('📭 No freshly inserted grants to announce.');
+//             return;
+//         }
 
-        let message = `*Нові гранти (${newGrants.length}) отримані з пошуку:*
-\n`;
-        newGrants.forEach((grant, idx) => {
-            const deadline = grant.deadline ? ` | Дедлайн: ${formatDeadline(grant.deadline)}` : '';
-            const category = grant.category ? ` | ${grant.category}` : '';
-            message += `${idx + 1}. <${grant.url}|${grant.title}>${deadline}${category}\n`;
-        });
-        message += `\nℹ️ Ці гранти будуть включені до щотижневого звіту. Використовуйте \`/grants\` для перегляду всіх.`;
+//         let message = `*Нові гранти (${newGrants.length}) отримані з пошуку:*
+// \n`;
+//         newGrants.forEach((grant, idx) => {
+//             const deadline = grant.deadline ? ` | Дедлайн: ${formatDeadline(grant.deadline)}` : '';
+//             const category = grant.category ? ` | ${grant.category}` : '';
+//             message += `${idx + 1}. <${grant.url}|${grant.title}>${deadline}${category}\n`;
+//         });
+//         message += `\nℹ️ Ці гранти будуть включені до щотижневого звіту. Використовуйте \`/grants\` для перегляду всіх.`;
 
-        await app.client.chat.postMessage({
-            token: process.env.SLACK_BOT_TOKEN,
-            channel: process.env.SLACK_CHANNEL_ID,
-            text: message,
-            unfurl_links: false,
-            unfurl_media: false
-        });
-        console.log(`📨 Posted immediate notification for ${newGrants.length} new grants.`);
-    } catch (error) {
-        console.error('Error sending immediate new grants:', error.message);
-    }
-}
+//         await app.client.chat.postMessage({
+//             token: process.env.SLACK_BOT_TOKEN,
+//             channel: process.env.SLACK_CHANNEL_ID,
+//             text: message,
+//             unfurl_links: false,
+//             unfurl_media: false
+//         });
+//         console.log(`📨 Posted immediate notification for ${newGrants.length} new grants.`);
+//     } catch (error) {
+//         console.error('Error sending immediate new grants:', error.message);
+//     }
+// }
 
 // Helper function to build the grant list message
 async function buildGrantsView(category = 'all', page = 1, sortOrder = 'asc', hideExpired = false) {
