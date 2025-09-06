@@ -46,23 +46,32 @@ function convertDeadlineToDate(deadlineStr) {
 
 async function saveGrants(grants) {
     if (!grants || grants.length === 0) {
-        console.log("No new grants to save.");
+        console.log("💾 [DATABASE] No new grants to save.");
         return [];
     }
 
+    console.log(`💾 [DATABASE] Starting to save ${grants.length} grants...`);
     const connection = await pool.getConnection();
     const newlyInserted = [];
     try {
         await connection.beginTransaction();
         let savedCount = 0;
         let skippedExpiredCount = 0;
+        let updatedCount = 0;
         
         const SOON_DAYS_THRESHOLD = 10; // Менше ніж за 10 днів переносимо в rejected
+        console.log(`📅 [DATABASE] Using ${SOON_DAYS_THRESHOLD} days threshold for soon-expiring grants`);
 
         for (const grant of grants) {
-            if (!grant || !grant.url) continue;
+            if (!grant || !grant.url) {
+                console.warn(`⚠️ [DATABASE] Skipping invalid grant (missing URL or data)`);
+                continue;
+            }
+            
+            console.log(`🔍 [DATABASE] Processing grant: "${grant.title}" from ${grant.url}`);
             
             const deadlineDate = convertDeadlineToDate(grant.deadline);
+            console.log(`📅 [DATABASE] Converted deadline "${grant.deadline}" → ${deadlineDate || 'NULL'}`);
             
             // Перевірка дедлайну: прострочені та ті що менш ніж за 10 днів заносимо у rejected_grants
             if (deadlineDate) {
@@ -75,46 +84,62 @@ async function saveGrants(grants) {
 
                 if (diffDays < 0) {
                     // Прострочений
-                    console.log(`⚠️ Moving expired grant to rejected: ${grant.title} (deadline: ${deadlineDate})`);
+                    console.log(`❌ [DATABASE] Moving expired grant to rejected: ${grant.title} (deadline: ${deadlineDate}, expired ${Math.abs(diffDays)} days ago)`);
                     skippedExpiredCount++;
                     await saveRejectedGrant(grant.url, grant.title || null, 'expired_deadline');
                     continue;
                 } else if (diffDays < SOON_DAYS_THRESHOLD) {
-                    console.log(`⚠️ Moving soon-expiring (<${SOON_DAYS_THRESHOLD}d) grant to rejected: ${grant.title} (deadline: ${deadlineDate}, in ${diffDays}d)`);
+                    console.log(`⚠️ [DATABASE] Moving soon-expiring (<${SOON_DAYS_THRESHOLD}d) grant to rejected: ${grant.title} (deadline: ${deadlineDate}, in ${diffDays}d)`);
                     skippedExpiredCount++;
                     await saveRejectedGrant(grant.url, grant.title || null, `deadline_less_than_${SOON_DAYS_THRESHOLD}_days`);
                     continue;
+                } else {
+                    console.log(`✅ [DATABASE] Grant deadline is valid: ${diffDays} days from now`);
                 }
+            } else {
+                console.log(`📅 [DATABASE] Grant has no deadline (open-ended)`);
             }
             
             const [rows] = await connection.execute('SELECT id FROM grants WHERE url = ?', [grant.url]);
             if (rows.length > 0) {
                 // Existing grant -> update
+                console.log(`🔄 [DATABASE] Updating existing grant (ID: ${rows[0].id})`);
                 await connection.execute(
                     'UPDATE grants SET title = ?, deadline = ?, category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
                     [grant.title, deadlineDate, grant.category, rows[0].id]
                 );
+                updatedCount++;
             } else {
                 // New grant -> insert & track for immediate notification
+                console.log(`➕ [DATABASE] Inserting new grant into database`);
                 await connection.execute(
                     'INSERT INTO grants (title, url, deadline, category) VALUES (?, ?, ?, ?)',
                     [grant.title, grant.url, deadlineDate, grant.category]
                 );
-                newlyInserted.push({
+                const newGrant = {
                     title: grant.title,
                     url: grant.url,
                     deadline: deadlineDate,
                     category: grant.category
-                });
+                };
+                newlyInserted.push(newGrant);
+                console.log(`✅ [DATABASE] Added to new grants list for notification: "${grant.title}"`);
             }
             savedCount++;
         }
         await connection.commit();
-        console.log(`✅ Successfully saved ${savedCount} grants. Skipped (expired/soon) ${skippedExpiredCount} grants. New inserts: ${newlyInserted.length}`);
+        console.log(`✅ [DATABASE] Transaction completed successfully`);
+        console.log(`📊 [DATABASE] Final results:`);
+        console.log(`   • Total processed: ${grants.length}`);
+        console.log(`   • Successfully saved: ${savedCount}`);
+        console.log(`   • Updated existing: ${updatedCount}`);
+        console.log(`   • New inserts: ${newlyInserted.length}`);
+        console.log(`   • Skipped (expired/soon): ${skippedExpiredCount}`);
+        
         return newlyInserted;
     } catch (error) {
         await connection.rollback();
-        console.error('Error saving grants to DB:', error);
+        console.error('❌ [DATABASE] Error saving grants to DB:', error);
         throw error;
     } finally {
         connection.release();

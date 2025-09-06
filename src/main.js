@@ -8,6 +8,7 @@ const euScraper = require('./scrapers/euScraper');
 const opportunityDeskScraper = require('./scrapers/opportunityDeskScraper');
 const { saveGrants, setupDatabase } = require('./lib/db');
 const { sendWeeklyGrants, startSlackApp, sendImmediateNewGrants } = require('./services/slack');
+const { logRecommendationEngineStatus } = require('./services/openai');
 
 // Configuration
 const CONFIG = {
@@ -26,67 +27,89 @@ const sources = [
 ];
 
 async function scrapeAll() {
-    console.log('🚀 Starting grant scraping process...');
+    console.log('🚀 [MAIN PROCESS] Starting grant scraping and recommendation process...');
+    console.log(`📋 [MAIN PROCESS] Configured scrapers: ${sources.map(s => s.name).join(', ')}`);
+    
+    // Log recommendation engine configuration
+    logRecommendationEngineStatus();
     
     try {
         // Ensure database table exists
+        console.log('🗄️ [MAIN PROCESS] Setting up database...');
         await setupDatabase();
         
         // Clean up expired grants before scraping
+        console.log('🧹 [MAIN PROCESS] Cleaning up expired grants...');
         const { cleanupExpiredGrants } = require('./lib/db');
         await cleanupExpiredGrants();
         
         const allGrants = [];
         let successCount = 0;
         let errorCount = 0;
+        console.log(`🎯 [MAIN PROCESS] Starting data collection from ${sources.length} sources...`);
 
         for (const scraper of sources) {
             try {
-                console.log(`📡 Scraping ${scraper.name}...`);
+                console.log(`📡 [MAIN PROCESS] Starting scraper: ${scraper.name}...`);
+                const startTime = Date.now();
                 const grants = await scraper.scrape();
+                const endTime = Date.now();
+                const duration = ((endTime - startTime) / 1000).toFixed(1);
+                
                 allGrants.push(...grants);
                 successCount++;
-                console.log(`✅ ${scraper.name}: ${grants.length} grants found`);
+                console.log(`✅ [MAIN PROCESS] ${scraper.name} completed: ${grants.length} grants collected in ${duration}s`);
             } catch (error) {
                 errorCount++;
-                console.error(`❌ Error scraping ${scraper.name}:`, error.message);
+                console.error(`❌ [MAIN PROCESS] Error in ${scraper.name}:`, error.message);
             } finally {
                 // Clean up browser resources for each scraper
                 if (scraper.cleanup && typeof scraper.cleanup === 'function') {
                     try {
                         await scraper.cleanup();
+                        console.log(`🧹 [MAIN PROCESS] Cleaned up ${scraper.name} resources`);
                     } catch (cleanupError) {
-                        console.warn(`⚠️ Error cleaning up ${scraper.name}: ${cleanupError.message}`);
+                        console.warn(`⚠️ [MAIN PROCESS] Error cleaning up ${scraper.name}: ${cleanupError.message}`);
                     }
                 }
             }
         }
 
+        console.log(`📊 [MAIN PROCESS] Data collection completed:`);
+        console.log(`   • Successful scrapers: ${successCount}/${sources.length}`);
+        console.log(`   • Failed scrapers: ${errorCount}/${sources.length}`);
+        console.log(`   • Total grants collected: ${allGrants.length}`);
+
         let newlyInserted = [];
         if (allGrants.length > 0) {
+            console.log(`💾 [MAIN PROCESS] Processing ${allGrants.length} collected grants...`);
             newlyInserted = await saveGrants(allGrants);
-            console.log(`💾 Processed ${allGrants.length} scraped grants (new: ${newlyInserted.length})`);
+            console.log(`📈 [MAIN PROCESS] Database processing completed:`);
+            console.log(`   • Total grants processed: ${allGrants.length}`);
+            console.log(`   • New grants added: ${newlyInserted.length}`);
+            console.log(`   • Recommendation pipeline success rate: ${((newlyInserted.length / allGrants.length) * 100).toFixed(1)}%`);
         } else {
-            console.log('ℹ️  No grants scraped to process');
+            console.log('ℹ️ [MAIN PROCESS] No grants collected from any scraper');
         }
         
-        console.log(`📊 Scraping completed. Success: ${successCount}/${sources.length}, Errors: ${errorCount}`);
+        console.log(`🎉 [MAIN PROCESS] Scraping and recommendation process completed successfully!`);
         return { allGrants, newlyInserted };
     } catch (error) {
-        console.error('💥 Critical error during scraping:', error.message);
+        console.error('💥 [MAIN PROCESS] Critical error during scraping:', error.message);
         throw error;
     } finally {
         // Ensure all scrapers are cleaned up
-        console.log('🧹 Final cleanup of all scrapers...');
+        console.log('🧹 [MAIN PROCESS] Final cleanup of all scrapers...');
         for (const scraper of sources) {
             if (scraper.cleanup && typeof scraper.cleanup === 'function') {
                 try {
                     await scraper.cleanup();
                 } catch (cleanupError) {
-                    console.warn(`⚠️ Final cleanup error for ${scraper.name}: ${cleanupError.message}`);
+                    console.warn(`⚠️ [MAIN PROCESS] Final cleanup error for ${scraper.name}: ${cleanupError.message}`);
                 }
             }
         }
+        console.log('✅ [MAIN PROCESS] All resources cleaned up');
     }
 }
 

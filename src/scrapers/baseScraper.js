@@ -82,7 +82,7 @@ class BaseScraper {
 
   async _extractDataFromUrl(url) {
     try {
-      console.log(`🔍 Scraping content from ${url}`);
+      console.log(`🔍 [DATA EXTRACTION] Starting content extraction from ${url}`);
       const pageContent = await this._getPageContent(url);
       const $ = cheerio.load(pageContent);
 
@@ -98,40 +98,49 @@ class BaseScraper {
         'body'
       ];
       
+      console.log(`🔧 [DATA EXTRACTION] Trying ${contentSelectors.length} content selectors for meaningful text extraction`);
+      
       let articleText = '';
+      let usedSelector = '';
       for (const selector of contentSelectors) {
         const text = $(selector).text().trim();
         if (text && text.length > 100) { // Ensure meaningful content
           articleText = text;
+          usedSelector = selector;
           break;
         }
       }
 
       if (!articleText) {
+        console.warn(`❌ [DATA EXTRACTION] No meaningful content found on ${url} using any selector`);
         // Save to rejected grants table
         await saveRejectedGrant(url, null, 'no_meaningful_content');
         throw new Error('No meaningful content found on the page');
       }
 
+      console.log(`✅ [DATA EXTRACTION] Successfully extracted content using selector: "${usedSelector}"`);
+
       // Limit text length to avoid OpenAI token limits
       const maxTextLength = 20000;
       if (articleText.length > maxTextLength) {
+        console.log(`✂️ [DATA EXTRACTION] Truncating text from ${articleText.length} to ${maxTextLength} characters`);
         articleText = articleText.substring(0, maxTextLength) + '...';
       }
 
-      console.log(`📄 Extracted text length: ${articleText.length} characters`);
+      console.log(`📄 [DATA EXTRACTION] Extracted text length: ${articleText.length} characters`);
+      console.log(`📤 [DATA EXTRACTION] Sending to recommendation engine for AI analysis...`);
       
       const grantInfo = await extractGrantInfo(articleText, url);
       
       if (grantInfo) {
-        console.log(`✅ Successfully extracted grant info from ${url}`);
+        console.log(`✅ [DATA EXTRACTION] Successfully extracted and categorized grant info from ${url}`);
       } else {
-        console.warn(`⚠️ No grant info extracted from ${url}`);
+        console.warn(`⚠️ [DATA EXTRACTION] AI recommendation engine returned null for ${url} (likely filtered out)`);
       }
       
       return grantInfo;
     } catch (error) {
-      console.error(`❌ Error extracting data from ${url}:`, error.message);
+      console.error(`❌ [DATA EXTRACTION] Error extracting data from ${url}:`, error.message);
       return null;
     }
   }
@@ -147,18 +156,25 @@ class BaseScraper {
     }
 
     try {
+      console.log(`🔍 [URL FILTERING] Checking ${urls.length} URLs against database...`);
       const existingUrls = await getExistingUrls(urls);
       const newUrls = urls.filter(url => !existingUrls.has(url));
       
-      console.log(`📊 URL filtering results for ${this.name}:`);
+      console.log(`📊 [URL FILTERING] Results for ${this.name}:`);
       console.log(`   • Total URLs: ${urls.length}`);
       console.log(`   • Already in database: ${existingUrls.size}`);
       console.log(`   • New URLs to process: ${newUrls.length}`);
       
+      if (newUrls.length === 0) {
+        console.log(`✅ [URL FILTERING] All URLs already processed - skipping content extraction phase`);
+      } else {
+        console.log(`🎯 [URL FILTERING] Found ${newUrls.length} new URLs requiring recommendation analysis`);
+      }
+      
       return newUrls;
     } catch (error) {
-      console.error(`❌ Error filtering URLs for ${this.name}:`, error.message);
-      console.log(`⚠️ Proceeding with all URLs due to database error`);
+      console.error(`❌ [URL FILTERING] Error filtering URLs for ${this.name}:`, error.message);
+      console.log(`⚠️ [URL FILTERING] Proceeding with all URLs due to database error`);
       return urls; // Return all URLs if database check fails
     }
   }

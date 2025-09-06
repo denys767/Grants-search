@@ -73,17 +73,31 @@ const keywords = {
 };
 
 async function extractGrantInfo(text, url) {
+  console.log(`🤖 [RECOMMENDATION ENGINE] Starting AI analysis for URL: ${url}`);
+  
   // Validate inputs
   if (!text || text.trim().length < 50) {
-    console.warn(`Insufficient text content for URL: ${url}`);
+    console.warn(`❌ [RECOMMENDATION ENGINE] Insufficient text content for URL: ${url} (length: ${text?.length || 0})`);
     return null;
   }
 
+  console.log(`📄 [RECOMMENDATION ENGINE] Processing text content (length: ${text.length} characters)`);
+  
   // Truncate text if too long
   const truncatedText = text.length > CONFIG.MAX_TEXT_LENGTH
     ? text.substring(0, CONFIG.MAX_TEXT_LENGTH) + '...'
     : text;
+    
+  if (text.length > CONFIG.MAX_TEXT_LENGTH) {
+    console.log(`✂️ [RECOMMENDATION ENGINE] Text truncated from ${text.length} to ${CONFIG.MAX_TEXT_LENGTH} characters`);
+  }
 
+
+  console.log(`🎯 [RECOMMENDATION ENGINE] Preparing AI prompt with materials:`);
+  console.log(`   • Available categories: ${categories.length} (${categories.join(', ')})`);
+  console.log(`   • Keyword sets: ${Object.keys(keywords).length} category groups`);
+  console.log(`   • Filtering criteria: grants <20k$, SME/small business, student scholarships`);
+  console.log(`   • AI Model: ${CONFIG.MODEL}, Temperature: ${CONFIG.TEMPERATURE}`);
 
   const prompt = `
 Витягни з тексту:
@@ -103,12 +117,17 @@ JSON: {"title": "назва", "deadline": "31-12-2024", "category": "катег�
 Текст: "${truncatedText}"
 `;
 
-  // Ключові слова для категорій:
-  // ${JSON.stringify(keywords, null, 2)}
+  console.log(`📤 [RECOMMENDATION ENGINE] Sending analysis request to OpenAI...`);
+
+// Ключові слова для категорій (використовуються AI для кращого розуміння контексту):
+// Ці ключові слова допомагають AI моделі краще розуміти які гранти відносити до кожної категорії
+// ${JSON.stringify(keywords, null, 2)}
 
   let attempt = 0;
   while (attempt < CONFIG.RETRY_COUNT) {
     try {
+      console.log(`🔄 [RECOMMENDATION ENGINE] Attempt ${attempt + 1}/${CONFIG.RETRY_COUNT} for URL: ${url}`);
+      
       const response = await axios.post('https://api.openai.com/v1/chat/completions', {
         model: CONFIG.MODEL,
         messages: [{ role: 'user', content: prompt }],
@@ -121,13 +140,21 @@ JSON: {"title": "назва", "deadline": "31-12-2024", "category": "катег�
         timeout: 30000 // 30 seconds timeout
       });
 
+      console.log(`📥 [RECOMMENDATION ENGINE] Received response from OpenAI for URL: ${url}`);
+      
       let content = response.data.choices[0].message.content;
+      console.log(`🔧 [RECOMMENDATION ENGINE] Raw AI response: ${content.substring(0, 200)}...`);
 
       // Remove markdown code blocks if present
       content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
-
       const result = JSON.parse(content);
+      console.log(`✅ [RECOMMENDATION ENGINE] Parsed recommendation result:`, {
+        title: result.title,
+        deadline: result.deadline,
+        category: result.category,
+        url: url
+      });
 
       // Validate result structure
       if (!result.title || typeof result.title !== 'string') {
@@ -135,22 +162,25 @@ JSON: {"title": "назва", "deadline": "31-12-2024", "category": "катег�
       }
 
       if (result.category === null) {
-        console.log(`Grant "${result.title}" from ${url} skipped - no matching category`);
+        console.log(`🚫 [RECOMMENDATION ENGINE] Grant "${result.title}" from ${url} filtered out - no matching category (likely <20k$, SME, or student scholarship)`);
         // Save to rejected grants table to avoid reprocessing
         await saveRejectedGrant(url, result.title, 'no_matching_category', text.substring(0, 1000));
         return null;
       }
 
+      console.log(`🎉 [RECOMMENDATION ENGINE] Successfully categorized grant: "${result.title}" → ${result.category}`);
       return { ...result, url };
 
     } catch (error) {
       attempt++;
       const isLastAttempt = attempt >= CONFIG.RETRY_COUNT;
 
+      console.log(`❌ [RECOMMENDATION ENGINE] Error on attempt ${attempt}/${CONFIG.RETRY_COUNT} for ${url}: ${error.message}`);
+
       if (error.response?.status === 429) {
         // Rate limit error - wait longer
         const waitTime = CONFIG.RETRY_DELAY * attempt * 2;
-        console.warn(`Rate limited for ${url}, retrying in ${waitTime}ms (attempt ${attempt}/${CONFIG.RETRY_COUNT})`);
+        console.warn(`⏳ [RECOMMENDATION ENGINE] Rate limited for ${url}, retrying in ${waitTime}ms (attempt ${attempt}/${CONFIG.RETRY_COUNT})`);
         if (!isLastAttempt) {
           await new Promise(resolve => setTimeout(resolve, waitTime));
           continue;
@@ -159,7 +189,7 @@ JSON: {"title": "назва", "deadline": "31-12-2024", "category": "катег�
 
       if (isLastAttempt) {
         const errorMessage = error.response?.data?.error?.message || error.message;
-        console.error(`Failed to extract grant info from ${url} after ${CONFIG.RETRY_COUNT} attempts:`, errorMessage);
+        console.error(`💥 [RECOMMENDATION ENGINE] Failed to extract grant info from ${url} after ${CONFIG.RETRY_COUNT} attempts:`, errorMessage);
 
         // Save to rejected grants table to avoid reprocessing
         await saveRejectedGrant(url, null, `extraction_failed: ${errorMessage}`, text.substring(0, 1000));
@@ -167,11 +197,53 @@ JSON: {"title": "назва", "deadline": "31-12-2024", "category": "катег�
       }
 
       // Wait before retry
+      console.log(`⏳ [RECOMMENDATION ENGINE] Waiting ${CONFIG.RETRY_DELAY * attempt}ms before retry...`);
       await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY * attempt));
     }
   }
 
+  console.log(`💥 [RECOMMENDATION ENGINE] All attempts exhausted for URL: ${url}`);
   return null;
 }
 
-module.exports = { extractGrantInfo };
+/**
+ * Get recommendation engine configuration for documentation and debugging
+ * @returns {Object} Configuration details
+ */
+function getRecommendationConfig() {
+  return {
+    model: CONFIG.MODEL,
+    temperature: CONFIG.TEMPERATURE,
+    maxTextLength: CONFIG.MAX_TEXT_LENGTH,
+    retryCount: CONFIG.RETRY_COUNT,
+    categories: categories,
+    keywordGroups: Object.keys(keywords).length,
+    keywords: keywords,
+    filteringCriteria: [
+      'Гранти менше $20,000',
+      'Для МСП/малого бізнесу', 
+      'Стипендії для учнів',
+      'Прострочені або скоро закінчуються (<10 днів)'
+    ]
+  };
+}
+
+/**
+ * Log detailed recommendation engine status
+ */
+function logRecommendationEngineStatus() {
+  const config = getRecommendationConfig();
+  console.log('🤖 [RECOMMENDATION ENGINE] Configuration:');
+  console.log(`   • AI Model: ${config.model}`);
+  console.log(`   • Temperature: ${config.temperature}`);
+  console.log(`   • Max text length: ${config.maxTextLength} characters`);
+  console.log(`   • Available categories: ${config.categories.length}`);
+  console.log(`   • Keyword groups: ${config.keywordGroups}`);
+  console.log(`   • Filtering criteria: ${config.filteringCriteria.length} rules`);
+}
+
+module.exports = { 
+  extractGrantInfo, 
+  getRecommendationConfig, 
+  logRecommendationEngineStatus 
+};
