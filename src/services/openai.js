@@ -8,7 +8,7 @@ const CONFIG = {
   RETRY_COUNT: 3,
   RETRY_DELAY: 1000,
   TEMPERATURE: 1,
-  MODEL: 'gpt-5-mini'
+  MODEL: 'gpt-5-nano'
 };
 
 const categories = [
