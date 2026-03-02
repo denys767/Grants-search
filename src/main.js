@@ -6,6 +6,11 @@ const prostirScraper = require('./scrapers/prostirScraper');
 const grantMarketScraper = require('./scrapers/grantMarketScraper');
 const euScraper = require('./scrapers/euScraper');
 const opportunityDeskScraper = require('./scrapers/opportunityDeskScraper');
+const bigIdeaScraper = require('./scrapers/bigIdeaScraper');
+const grantSenseScraper = require('./scrapers/grantSenseScraper');
+const veteranFundScraper = require('./scrapers/veteranFundScraper');
+const ngoNetworkScraper = require('./scrapers/ngoNetworkScraper');
+const chasZminScraper = require('./scrapers/chasZminScraper');
 const { saveGrants, setupDatabase } = require('./lib/db');
 const { sendWeeklyGrants, startSlackApp, sendImmediateNewGrants } = require('./services/slack');
 
@@ -22,7 +27,12 @@ const sources = [
      prostirScraper,
      grantMarketScraper,
      euScraper,
-     opportunityDeskScraper
+     opportunityDeskScraper,
+     bigIdeaScraper,
+     grantSenseScraper,
+     veteranFundScraper,
+     ngoNetworkScraper,
+     chasZminScraper
 ];
 
 async function scrapeAll() {
@@ -106,9 +116,9 @@ async function handleWeeklyReport() {
     }
 }
 
-// Schedule scraping every Monday at 8 AM and send report for newly found grants
+// Schedule scraping every Tuesday at 8 AM and send report for newly found grants
 if (CONFIG.SCHEDULED_SCRAPING_ENABLED) {
-    cron.schedule('0 8 * * 1', async () => {
+    cron.schedule('0 8 * * 2', async () => {
         console.log('⏰ Running scheduled weekly grant scraping...');
         const { newlyInserted } = await scrapeAll();
         if (newlyInserted.length > 0) {
