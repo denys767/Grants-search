@@ -3,6 +3,67 @@ const cheerio = require('cheerio');
 const { extractGrantInfo } = require('../services/openai');
 const { getExistingUrls, saveRejectedGrant } = require('../lib/db');
 
+const CONTENT_SELECTORS = [
+  'article [itemprop="articleBody"]',
+  'article .entry-content',
+  'article .post-content',
+  'article .article-content',
+  'article .post-body',
+  'article .article-body',
+  'sedia-call-detail',
+  'sedia-call-details',
+  'eui-page-content',
+  '[itemprop="articleBody"]',
+  '.entry-content',
+  '.post-content',
+  '.article-content',
+  '.post-body',
+  '.article-body',
+  'article'
+];
+
+const NON_ARTICLE_SELECTORS = [
+  'aside',
+  'nav',
+  'footer',
+  'form',
+  '[role="navigation"]',
+  '[role="complementary"]',
+  '.sidebar',
+  '.widget',
+  '.related',
+  '.related-posts',
+  '.recommended',
+  '.recommendations',
+  '.post-navigation',
+  '.share-buttons',
+  '.social-share',
+  '.comments',
+  '.advertisement',
+  '.ads'
+].join(', ');
+
+/**
+ * Extract text from the article itself, never from a page-wide fallback such as
+ * main or body. This prevents a sidebar or a "recommended" card from being
+ * classified as the current opportunity.
+ */
+function extractMainArticleText(pageContent) {
+  const $ = cheerio.load(pageContent);
+
+  for (const selector of CONTENT_SELECTORS) {
+    const content = $(selector).first();
+    if (!content.length) continue;
+
+    const cleanedContent = content.clone();
+    cleanedContent.find(NON_ARTICLE_SELECTORS).remove();
+    const text = cleanedContent.text().replace(/\s+/g, ' ').trim();
+    if (text.length > 100) return text;
+  }
+
+  return '';
+}
+
 class BaseScraper {
   constructor(name, url) {
     this.name = name;
@@ -84,56 +145,40 @@ class BaseScraper {
     try {
       console.log(`🔍 Scraping content from ${url}`);
       const pageContent = await this._getPageContent(url);
-      const $ = cheerio.load(pageContent);
-
-      // Enhanced content extraction with multiple fallbacks
-      const contentSelectors = [
-        'article',
-        '.post-content', 
-        '.entry-content',
-        '.content',
-        'main',
-        '.main-content',
-        '#content',
-        'body'
-      ];
-      
-      let articleText = '';
-      for (const selector of contentSelectors) {
-        const text = $(selector).text().trim();
-        if (text && text.length > 100) { // Ensure meaningful content
-          articleText = text;
-          break;
-        }
-      }
-
-      if (!articleText) {
-        // Save to rejected grants table
-        await saveRejectedGrant(url, null, 'no_meaningful_content');
-        throw new Error('No meaningful content found on the page');
-      }
-
-      // Limit text length to avoid OpenAI token limits
-      const maxTextLength = 20000;
-      if (articleText.length > maxTextLength) {
-        articleText = articleText.substring(0, maxTextLength) + '...';
-      }
-
-      console.log(`📄 Extracted text length: ${articleText.length} characters`);
-      
-      const grantInfo = await extractGrantInfo(articleText, url);
-      
-      if (grantInfo) {
-        console.log(`✅ Successfully extracted grant info from ${url}`);
-      } else {
-        console.warn(`⚠️ No grant info extracted from ${url}`);
-      }
-      
-      return grantInfo;
+      return await this._processPageContent(pageContent, url);
     } catch (error) {
       console.error(`❌ Error extracting data from ${url}:`, error.message);
       return null;
     }
+  }
+
+  _extractMainArticleText(pageContent) {
+    return extractMainArticleText(pageContent);
+  }
+
+  async _processPageContent(pageContent, url) {
+    const articleText = this._extractMainArticleText(pageContent);
+
+    if (!articleText) {
+      await saveRejectedGrant(url, null, 'no_meaningful_content');
+      throw new Error('No meaningful content found in an article container on the page');
+    }
+
+    const maxTextLength = 20000;
+    const truncatedText = articleText.length > maxTextLength
+      ? articleText.substring(0, maxTextLength) + '...'
+      : articleText;
+
+    console.log(`📄 Extracted text length: ${truncatedText.length} characters`);
+    const grantInfo = await extractGrantInfo(truncatedText, url);
+
+    if (grantInfo) {
+      console.log(`✅ Successfully extracted grant info from ${url}`);
+    } else {
+      console.warn(`⚠️ No grant info extracted from ${url}`);
+    }
+
+    return grantInfo;
   }
 
   /**
@@ -179,5 +224,7 @@ class BaseScraper {
     }
   }
 }
+
+BaseScraper.extractMainArticleText = extractMainArticleText;
 
 module.exports = BaseScraper;

@@ -7,7 +7,7 @@ const CONFIG = {
   MAX_TEXT_LENGTH: 50000,
   RETRY_COUNT: 3,
   RETRY_DELAY: 1000,
-  TEMPERATURE: 1,
+  TEMPERATURE: 0.2,
   MODEL: 'gpt-5-mini'
 };
 
@@ -74,7 +74,40 @@ const categories = [
 //   ]
 // };
 
-async function extractGrantInfo(text, url) {
+const VALID_TYPES = new Set(['grant', 'competition', 'tender']);
+const VALID_REJECTION_REASONS = new Set([
+  'no_matching_category',
+  'irrelevant_topic',
+  'internal_kse_opportunity'
+]);
+
+function normalizeExtractionResult(result) {
+  if (!result || !result.title || typeof result.title !== 'string') {
+    throw new Error('Invalid response: missing or invalid title');
+  }
+
+  if (result.category !== null && !categories.includes(result.category)) {
+    throw new Error('Invalid response: unknown category');
+  }
+
+  const rejectionReason = VALID_REJECTION_REASONS.has(result.rejection_reason)
+    ? result.rejection_reason
+    : 'no_matching_category';
+
+  return {
+    title: result.title.trim(),
+    deadline: typeof result.deadline === 'string' ? result.deadline : null,
+    category: result.category === null ? null : result.category,
+    type: VALID_TYPES.has(result.type) ? result.type : 'grant',
+    low_budget: result.low_budget === true,
+    rejection_reason: result.category === null ? rejectionReason : null
+  };
+}
+
+async function extractGrantInfo(text, url, dependencies = {}) {
+  const post = dependencies.post || axios.post;
+  const reject = dependencies.saveRejectedGrant || saveRejectedGrant;
+  const sleep = dependencies.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   // Validate inputs
   if (!text || text.trim().length < 50) {
     console.warn(`Insufficient text content for URL: ${url}`);
@@ -88,17 +121,17 @@ async function extractGrantInfo(text, url) {
 
 
   const prompt = `
-Витягни з тексту:
-- title: назва
-- deadline: DD-MM-YYYY або null
-- category: одна з ${categories.join(', ')}
-Потрібні лише ті гранти, в яких організація (університет KSE) може отримати фінансування за надання навчальних чи консультаційних послуг у вищезазначених категоріях. Грант має підходити за критеріями нижче, якщо грант не підходить встанови null у всі пункти JSON крім title (наприклад {"title": "назва", "deadline": null, "category": null}, НЕ ПОВЕРТАЙ ПРОСТО [], АБО КІЛЬКА JSON об'єктів ОДНОЧАСНО )
-- сума гранту >20k$ (Якщо сума не вказана, ігноруй мінімальну суму)  
-- Не включати можливості лише для участі як фізособа та ті де немає освітньої складової (наприклад, ремонти, інфраструктура, культурні заходи без навчання). Має бути навчальна або консультаційна складова. 
-- Включати гранти для навчання з підприємництва, стартапів, підтримки ветеранів тощо — якщо подання від імені університету KSE можливе.
+Поверни рівно один JSON-об'єкт без Markdown:
+{"title":"назва","deadline":"DD-MM-YYYY або null","category":"категорія або null","type":"grant|competition|tender","low_budget":true|false,"rejection_reason":"no_matching_category|irrelevant_topic|internal_kse_opportunity|null"}
 
-JSON: 
-{"title": "назва", "deadline": "31-12-2024", "category": "категорія"}
+Шукай лише можливості, де KSE як університет може отримати фінансування за надання навчальних або консультаційних послуг у категоріях: ${categories.join(', ')}.
+- Не включай можливості лише для фізичних осіб і ті, де немає навчальної чи консультаційної складової.
+- Якщо прямо вказаний бюджет на одного партнера менший за $30,000, постав low_budget: true. Якщо суми немає або вона від $30,000 — false. Не відхиляй можливість лише через малий бюджет.
+- Відхили (category: null, rejection_reason: "irrelevant_topic") лише коли основною метою можливості є advocacy/адвокація, civil society/громадянське суспільство, democracy/democratization/демократія/демократизація, human rights/права людини або civic engagement/громадська участь. Побіжна згадка цих тем не є підставою для відхилення.
+- Відхили (category: null, rejection_reason: "internal_kse_opportunity"), якщо KSE, Kyiv School of Economics або KSE Business School є донором чи організатором. Не відхиляй, якщо KSE лише може бути заявником або партнером.
+- Якщо можливість не відповідає іншим критеріям, поверни category: null і rejection_reason: "no_matching_category".
+- type: "grant" для грантового фінансування, "competition" для конкурсу з відбором переможців, "tender" для закупівлі/тендеру. Якщо тип неясний, використовуй "grant".
+
 Текст гранту: "${truncatedText}"
 `;
 
@@ -108,7 +141,7 @@ JSON:
   let attempt = 0;
   while (attempt < CONFIG.RETRY_COUNT) {
     try {
-      const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+      const response = await post('https://api.openai.com/v1/chat/completions', {
         model: CONFIG.MODEL,
         messages: [{ role: 'user', content: prompt }],
         temperature: CONFIG.TEMPERATURE,
@@ -126,17 +159,12 @@ JSON:
       content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
 
-      const result = JSON.parse(content);
-
-      // Validate result structure
-      if (!result.title || typeof result.title !== 'string') {
-        throw new Error('Invalid response: missing or invalid title');
-      }
+      const result = normalizeExtractionResult(JSON.parse(content));
 
       if (result.category === null) {
-        console.log(`Grant "${result.title}" from ${url} skipped - no matching category`);
+        console.log(`Grant "${result.title}" from ${url} skipped - ${result.rejection_reason}`);
         // Save to rejected grants table to avoid reprocessing
-        await saveRejectedGrant(url, result.title, 'no_matching_category', text.substring(0, 1000));
+        await reject(url, result.title, result.rejection_reason, text.substring(0, 1000));
         return null;
       }
 
@@ -151,7 +179,7 @@ JSON:
         const waitTime = CONFIG.RETRY_DELAY * attempt * 2;
         console.warn(`Rate limited for ${url}, retrying in ${waitTime}ms (attempt ${attempt}/${CONFIG.RETRY_COUNT})`);
         if (!isLastAttempt) {
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+          await sleep(waitTime);
           continue;
         }
       }
@@ -161,16 +189,16 @@ JSON:
         console.error(`Failed to extract grant info from ${url} after ${CONFIG.RETRY_COUNT} attempts:`, errorMessage);
 
         // Save to rejected grants table to avoid reprocessing
-        await saveRejectedGrant(url, null, `extraction_failed: ${errorMessage}`, text.substring(0, 1000));
+        await reject(url, null, `extraction_failed: ${errorMessage}`, text.substring(0, 1000));
         return null;
       }
 
       // Wait before retry
-      await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY * attempt));
+      await sleep(CONFIG.RETRY_DELAY * attempt);
     }
   }
 
   return null;
 }
 
-module.exports = { extractGrantInfo };
+module.exports = { extractGrantInfo, normalizeExtractionResult, CONFIG };

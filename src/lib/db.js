@@ -44,13 +44,27 @@ function convertDeadlineToDate(deadlineStr) {
     return null;
 }
 
-async function saveGrants(grants) {
+function normalizeGrantTitle(title) {
+    return String(title || '')
+        .toLocaleLowerCase('uk-UA')
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeGrantType(type) {
+    return ['grant', 'competition', 'tender'].includes(type) ? type : 'grant';
+}
+
+async function saveGrants(grants, dependencies = {}) {
     if (!grants || grants.length === 0) {
         console.log("No new grants to save.");
         return [];
     }
 
-    const connection = await pool.getConnection();
+    const connection = dependencies.connection || await pool.getConnection();
+    const releaseConnection = !dependencies.connection;
+    const reject = dependencies.saveRejectedGrant || saveRejectedGrant;
     const newlyInserted = [];
     try {
         await connection.beginTransaction();
@@ -60,9 +74,12 @@ async function saveGrants(grants) {
         const SOON_DAYS_THRESHOLD = 10; // Менше ніж за 10 днів переносимо в rejected
 
         for (const grant of grants) {
-            if (!grant || !grant.url) continue;
+            if (!grant || !grant.url || !grant.title) continue;
             
             const deadlineDate = convertDeadlineToDate(grant.deadline);
+            const normalizedTitle = normalizeGrantTitle(grant.title);
+            const type = normalizeGrantType(grant.type);
+            const lowBudget = grant.low_budget === true ? 1 : 0;
             
             // Перевірка дедлайну: прострочені та ті що менш ніж за 10 днів заносимо у rejected_grants
             if (deadlineDate) {
@@ -77,34 +94,47 @@ async function saveGrants(grants) {
                     // Прострочений
                     console.log(`⚠️ Moving expired grant to rejected: ${grant.title} (deadline: ${deadlineDate})`);
                     skippedExpiredCount++;
-                    await saveRejectedGrant(grant.url, grant.title || null, 'expired_deadline');
+                    await reject(grant.url, grant.title || null, 'expired_deadline');
                     continue;
                 } else if (diffDays < SOON_DAYS_THRESHOLD) {
                     console.log(`⚠️ Moving soon-expiring (<${SOON_DAYS_THRESHOLD}d) grant to rejected: ${grant.title} (deadline: ${deadlineDate}, in ${diffDays}d)`);
                     skippedExpiredCount++;
-                    await saveRejectedGrant(grant.url, grant.title || null, `deadline_less_than_${SOON_DAYS_THRESHOLD}_days`);
+                    await reject(grant.url, grant.title || null, `deadline_less_than_${SOON_DAYS_THRESHOLD}_days`);
                     continue;
                 }
             }
             
-            const [rows] = await connection.execute('SELECT id FROM grants WHERE url = ?', [grant.url]);
-            if (rows.length > 0) {
+            const [urlRows] = await connection.execute('SELECT id FROM grants WHERE url = ?', [grant.url]);
+            if (urlRows.length > 0) {
                 // Existing grant -> update
                 await connection.execute(
-                    'UPDATE grants SET title = ?, deadline = ?, category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
-                    [grant.title, deadlineDate, grant.category, rows[0].id]
+                    'UPDATE grants SET title = ?, normalized_title = ?, deadline = ?, category = ?, type = ?, low_budget = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                    [grant.title, normalizedTitle, deadlineDate, grant.category, type, lowBudget, urlRows[0].id]
                 );
             } else {
+                const [titleRows] = await connection.execute(
+                    'SELECT id FROM grants WHERE normalized_title = ? LIMIT 1',
+                    [normalizedTitle]
+                );
+
+                if (titleRows.length > 0) {
+                    console.log(`⚠️ Skipping duplicate grant title: ${grant.title}`);
+                    await reject(grant.url, grant.title, 'duplicate_title');
+                    continue;
+                }
+
                 // New grant -> insert & track for immediate notification
                 await connection.execute(
-                    'INSERT INTO grants (title, url, deadline, category) VALUES (?, ?, ?, ?)',
-                    [grant.title, grant.url, deadlineDate, grant.category]
+                    'INSERT INTO grants (title, normalized_title, url, deadline, category, type, low_budget) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [grant.title, normalizedTitle, grant.url, deadlineDate, grant.category, type, lowBudget]
                 );
                 newlyInserted.push({
                     title: grant.title,
                     url: grant.url,
                     deadline: deadlineDate,
-                    category: grant.category
+                    category: grant.category,
+                    type,
+                    low_budget: Boolean(lowBudget)
                 });
             }
             savedCount++;
@@ -117,7 +147,32 @@ async function saveGrants(grants) {
         console.error('Error saving grants to DB:', error);
         throw error;
     } finally {
-        connection.release();
+        if (releaseConnection) connection.release();
+    }
+}
+
+async function ensureGrantsColumn(connection, columnName, definition) {
+    const [columns] = await connection.execute(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'grants' AND COLUMN_NAME = ?`,
+        [dbConfig.database, columnName]
+    );
+
+    if (columns.length === 0) {
+        await connection.execute(`ALTER TABLE grants ADD COLUMN ${columnName} ${definition}`);
+        console.log(`Added grants.${columnName} column.`);
+    }
+}
+
+async function backfillNormalizedTitles(connection) {
+    const [rows] = await connection.execute(
+        'SELECT id, title FROM grants WHERE normalized_title IS NULL OR normalized_title = \'\''
+    );
+
+    for (const row of rows) {
+        await connection.execute(
+            'UPDATE grants SET normalized_title = ? WHERE id = ?',
+            [normalizeGrantTitle(row.title), row.id]
+        );
     }
 }
 
@@ -144,11 +199,18 @@ async function setupDatabase() {
                 url VARCHAR(2048) NOT NULL,
                 deadline DATE NULL DEFAULT NULL,
                 category VARCHAR(255) NOT NULL,
+                type VARCHAR(32) NOT NULL DEFAULT 'grant',
+                low_budget TINYINT(1) NOT NULL DEFAULT 0,
+                normalized_title VARCHAR(255) NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 UNIQUE KEY url_idx (url(255))
             );
         `);
+        await ensureGrantsColumn(poolConnection, 'type', "VARCHAR(32) NOT NULL DEFAULT 'grant'");
+        await ensureGrantsColumn(poolConnection, 'low_budget', 'TINYINT(1) NOT NULL DEFAULT 0');
+        await ensureGrantsColumn(poolConnection, 'normalized_title', 'VARCHAR(255) NULL');
+        await backfillNormalizedTitles(poolConnection);
         console.log('Table "grants" is ready.');
         
         // Create rejected grants table
@@ -422,5 +484,7 @@ module.exports = {
     saveRejectedGrant, 
     getRejectedUrls,
     getRejectedGrants,
-    cleanupExpiredGrants
+    cleanupExpiredGrants,
+    normalizeGrantTitle,
+    normalizeGrantType
 };

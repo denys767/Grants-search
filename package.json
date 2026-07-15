@@ -5,6 +5,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "node src/main.js",
+    "test": "node --test test/*.test.js",
     "test:links": "node test-scraper-links.js"
   },
   "keywords": [

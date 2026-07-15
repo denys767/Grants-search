@@ -10,7 +10,6 @@ const bigIdeaScraper = require('./scrapers/bigIdeaScraper');
 const grantSenseScraper = require('./scrapers/grantSenseScraper');
 const veteranFundScraper = require('./scrapers/veteranFundScraper');
 const ngoNetworkScraper = require('./scrapers/ngoNetworkScraper');
-const chasZminScraper = require('./scrapers/chasZminScraper');
 const { saveGrants, setupDatabase } = require('./lib/db');
 const { sendWeeklyGrants, startSlackApp, sendImmediateNewGrants } = require('./services/slack');
 
@@ -31,8 +30,7 @@ const sources = [
      bigIdeaScraper,
      grantSenseScraper,
      veteranFundScraper,
-     ngoNetworkScraper,
-     chasZminScraper
+    ngoNetworkScraper
 ];
 
 async function scrapeAll() {

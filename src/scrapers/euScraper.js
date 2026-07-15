@@ -192,7 +192,8 @@ class EUScraper extends BaseScraper {
             console.log('⏳ Waiting for EU Portal content to load...');
             await page.waitForTimeout(this.euContentWaitTime);
             
-            // Wait for basic page structure to appear
+            // Wait for the page shell; content extraction below remains limited to
+            // article-specific containers inherited from BaseScraper.
             try {
                 // Wait for main content elements to load
                 await page.waitForSelector('main, .main-content, [role="main"]', { timeout: 5000 });
@@ -221,79 +222,8 @@ class EUScraper extends BaseScraper {
      * @returns {Promise<Object|null>} - The processed grant data
      */
     async _processExtractedContent(content, url) {
-        const cheerio = require('cheerio');
-        const { saveRejectedGrant } = require('../lib/db');
-        const openai = require('../services/openai');
-        
         try {
-            const $ = cheerio.load(content);
-
-            // EU Portal specific content selectors
-            const contentSelectors = [
-                'main',
-                '.main-content',
-                '[role="main"]',
-                '.content',
-                'article',
-                '.post-content',
-                '.entry-content',
-                '#content',
-                'body'
-            ];
-            
-            let articleText = '';
-            for (const selector of contentSelectors) {
-                const text = $(selector).text().trim();
-                if (text && text.length > 100) { // Ensure meaningful content
-                    articleText = text;
-                    break;
-                }
-            }
-
-            if (!articleText) {
-                // Save to rejected grants table
-                await saveRejectedGrant(url, null, 'no_meaningful_content');
-                throw new Error('No meaningful content found on the page');
-            }
-
-            // Limit text length to avoid OpenAI token limits
-            const maxTextLength = 20000;
-            if (articleText.length > maxTextLength) {
-                articleText = articleText.substring(0, maxTextLength) + '...';
-            }
-
-            console.log(`📄 Extracted text length: ${articleText.length} characters`);
-
-            // Extract data using OpenAI with retry mechanism
-            const maxRetries = 3;
-            let lastError;
-            
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    const grantInfo = await openai.extractGrantInfo(articleText, url);
-                    
-                    if (grantInfo && grantInfo.title && grantInfo.title.trim()) {
-                        console.log(`✅ Successfully extracted grant info for ${url}`);
-                        return grantInfo;
-                    } else {
-                        throw new Error('Invalid response: missing or invalid title');
-                    }
-                } catch (error) {
-                    lastError = error;
-                    console.log(`⚠️ Attempt ${attempt}/${maxRetries} failed for ${url}: ${error.message}`);
-                    
-                    if (attempt < maxRetries) {
-                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                    }
-                }
-            }
-
-            // If all attempts failed, save to rejected grants
-            await saveRejectedGrant(url, articleText, `extraction_failed: ${lastError.message}`);
-            console.log(`Failed to extract grant info from ${url} after ${maxRetries} attempts: ${lastError.message}`);
-            console.log(`⚠️ No grant info extracted from ${url}`);
-            return null;
-
+            return await this._processPageContent(content, url);
         } catch (error) {
             console.error(`❌ Error processing content for ${url}:`, error.message);
             return null;

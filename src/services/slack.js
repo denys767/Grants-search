@@ -1,5 +1,6 @@
 const { App } = require('@slack/bolt');
 const { getGrants, getGrantCategories, getWeeklyGrants } = require('../lib/db');
+const { formatOpportunityType, formatGrantMetadata } = require('./grantFormatting');
 
 // Helper function to format date for display
 function formatDeadline(deadline) {
@@ -37,7 +38,7 @@ async function sendWeeklyGrants(grants = null) {
             newGrants.forEach((grant, index) => {
                 const deadline = grant.deadline ? ` | Дедлайн: ${formatDeadline(grant.deadline)}` : '';
                 const category = grant.category ? ` | ${grant.category}` : '';
-                message += `${index + 1}. <${grant.url}|${grant.title}>${deadline}${category}\n`;
+                message += `${index + 1}. <${grant.url}|${grant.title}>${deadline}${category}${formatGrantMetadata(grant, true)}\n`;
             });
             
             message += `\n💡 Використовуйте \`/grants\` для детального перегляду та фільтрації`;
@@ -205,7 +206,7 @@ async function buildGrantsView(category = 'all', page = 1, sortOrder = 'asc', hi
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": `🔗*<${grant.url}|${grant.title}>*\n*⏰Дедлайн:* ${formatDeadline(grant.deadline)}\n*📦Категорія:* ${grant.category}`
+                    "text": `🔗*<${grant.url}|${grant.title}>*\n*⏰Дедлайн:* ${formatDeadline(grant.deadline)}\n*📦Категорія:* ${grant.category}\n*🧭${formatGrantMetadata(grant)}*`
                 }
             });
         });
@@ -384,4 +385,4 @@ async function startSlackApp() {
     }
 }
 
-module.exports = { sendWeeklyGrants, startSlackApp };
+module.exports = { sendWeeklyGrants, startSlackApp, formatOpportunityType, formatGrantMetadata };
