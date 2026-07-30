@@ -6,14 +6,29 @@ const BaseScraper = require('./baseScraper');
 class OpportunityDeskScraper extends BaseScraper {
     constructor() {
         super('OpportunityDesk', 'https://opportunitydesk.org/category/grants/');
+        this.feedUrl = 'https://opportunitydesk.org/category/grants/feed/';
         this.maxPages = parseInt(process.env.MAX_PAGES) || 5;
         this.maxGrantsToProcess = parseInt(process.env.MAX_GRANTS) || 50;
         this.batchSize = parseInt(process.env.BATCH_SIZE) || 5;
         this.delayBetweenBatches = parseInt(process.env.BATCH_DELAY) || 1000;
     }
 
+    _extractGrantLinksFromFeed(content) {
+        // Playwright renders XML documents inside a <pre> element. Parse that
+        // text as XML rather than relying on the Cloudflare-protected HTML page.
+        const $document = cheerio.load(content);
+        const xml = $document('pre').text().trim() || content;
+        const $feed = cheerio.load(xml, { xmlMode: true });
+
+        return [...new Set(
+            $feed('item > link').map((i, el) => $feed(el).text().trim()).get()
+                .filter(link => link.startsWith('https://opportunitydesk.org/'))
+        )];
+    }
+
     /**
-     * Scrape grants from all pages using pagination
+     * Scrape grants from the site's public RSS feed. The HTML category page is
+     * protected by Cloudflare, while the publisher-provided feed is accessible.
      * @returns {Promise<Array>} Array of grant data
      */
     async scrape() {
@@ -25,24 +40,15 @@ class OpportunityDeskScraper extends BaseScraper {
         
         // Scrape grants from multiple pages
         while (currentPage <= this.maxPages) {
-            const pageUrl = currentPage === 1 
-                ? this.url 
-                : `${this.url}page/${currentPage}/`;
+            const pageUrl = currentPage === 1
+                ? this.feedUrl
+                : `${this.feedUrl}?paged=${currentPage}`;
                 
             console.log(`📖 Scraping page ${currentPage}: ${pageUrl}`);
             
             try {
                 const content = await this._getPageContent(pageUrl);
-                const $ = cheerio.load(content);
-                const pageGrantLinks = [];
-
-                // Extract grant links from articles based on HTML structure
-                $('.l-post .post-title a').each((i, el) => {
-                    const link = $(el).attr('href');
-                    if (link && link.startsWith('https://opportunitydesk.org/')) {
-                        pageGrantLinks.push(link);
-                    }
-                });
+                const pageGrantLinks = this._extractGrantLinksFromFeed(content);
 
                 console.log(`📄 Found ${pageGrantLinks.length} grant links on page ${currentPage}`);
                 
@@ -56,13 +62,6 @@ class OpportunityDeskScraper extends BaseScraper {
                 // Check if we've reached the maximum number of grants
                 if (this.maxGrantsToProcess > 0 && allGrantLinks.length >= this.maxGrantsToProcess) {
                     console.log(`🎯 Reached maximum grants limit (${this.maxGrantsToProcess}), stopping pagination`);
-                    break;
-                }
-                
-                // Check for next page button
-                const hasNextPage = $('.next.page-numbers').length > 0;
-                if (!hasNextPage) {
-                    console.log(`🔚 No next page button found, stopping pagination`);
                     break;
                 }
                 

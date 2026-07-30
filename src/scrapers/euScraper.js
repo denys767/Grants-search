@@ -1,5 +1,21 @@
 const { chromium } = require('playwright');
+const axios = require('axios');
 const BaseScraper = require('./baseScraper');
+
+function firstValue(metadata, key) {
+    const value = metadata?.[key];
+    return Array.isArray(value) ? value[0] : value;
+}
+
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[char]));
+}
 
 class EUScraper extends BaseScraper {
     constructor() {
@@ -9,165 +25,72 @@ class EUScraper extends BaseScraper {
         this.batchSize = parseInt(process.env.BATCH_SIZE) || 5;
         this.delayBetweenBatches = parseInt(process.env.BATCH_DELAY) || 1000;
         this.euContentWaitTime = parseInt(process.env.EU_CONTENT_WAIT_TIME) || 6000;
+        this.euResultsTimeout = parseInt(process.env.EU_RESULTS_TIMEOUT) || 45000;
+        this.apiUrl = 'https://api.tech.ec.europa.eu/search-api/prod/rest/search?apiKey=SEDIA&text=Ukraine';
+        this.apiPageSize = 50;
+    }
+
+    async _fetchApiPage(pageNumber) {
+        const query = {
+            bool: {
+                must: [
+                    { terms: { type: ['1'] } },
+                    { terms: { status: ['31094501', '31094502'] } },
+                    { term: { programmePeriod: '2021 - 2027' } }
+                ]
+            }
+        };
+        const form = new FormData();
+        form.append('query', new Blob([JSON.stringify(query)], { type: 'application/json' }), 'query.json');
+        const response = await axios.post(`${this.apiUrl}&pageSize=${this.apiPageSize}&pageNumber=${pageNumber}`, form, {
+            timeout: 30000
+        });
+        return response.data.results || [];
+    }
+
+    _apiResultToContent(result) {
+        const metadata = result.metadata || {};
+        const values = [
+            firstValue(metadata, 'title'),
+            result.summary,
+            firstValue(metadata, 'descriptionByte'),
+            firstValue(metadata, 'additionalInfos'),
+            firstValue(metadata, 'budgetOverview'),
+            firstValue(metadata, 'actions'),
+            firstValue(metadata, 'deadlineDate')
+        ].filter(Boolean);
+        return `<article>${escapeHtml(values.join('\n\n'))}</article>`;
     }
 
     async scrape() {
-        console.log(`🚀 Starting ${this.name} scraping with Playwright...`);
-        
-        const browser = await chromium.launch({ 
-            headless: true,
-            timeout: 60000
-        });
-        const context = await browser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        });
-        const page = await context.newPage();
-        
-        let allGrantLinks = [];
-        let currentPage = 1;
-        
-        try {
-            while (currentPage <= this.maxPages) {
-                console.log(`📄 Processing page ${currentPage}/${this.maxPages}`);
-                
-                // Construct URL for current page
-                const pageUrl = this.url.replace('pageNumber=1', `pageNumber=${currentPage}`);
-                console.log(`🔗 Navigating to: ${pageUrl}`);
-                
-                await page.goto(pageUrl, { 
-                    waitUntil: 'networkidle',
-                    timeout: 60000 
-                });
+        console.log(`🚀 Starting ${this.name} scraping with the public Funding & Tenders API...`);
+        const opportunities = new Map();
 
-                // The cookie banner overlays the page and prevents the
-                // opportunities component from becoming interactive.
-                const essentialCookiesButton = page.locator('a[href="#refuse"]');
-                if (await essentialCookiesButton.count()) {
-                    await essentialCookiesButton.click();
-                }
-                
-                // Wait for content to load (2-4 seconds as mentioned)
-                console.log('⏳ Waiting for initial page load...');
-                await page.waitForTimeout(4000);
-                
-                // Wait for loading animations to end and content to appear
-                console.log('⏳ Waiting for loading animations to end...');
-                try {
-                    // Wait for the main content container to appear
-                    await page.waitForSelector('sedia-result-card-calls-for-proposals', { timeout: 10000 });
-                    
-                    // Wait for any loading spinners to disappear
-                    await page.waitForFunction(() => {
-                        const spinners = document.querySelectorAll('.eui-icon-spinner, [class*="loading"], [class*="spinner"]');
-                        return spinners.length === 0 || Array.from(spinners).every(spinner => 
-                            spinner.style.display === 'none' || 
-                            !spinner.offsetParent
-                        );
-                    }, { timeout: 4000 });
-                    
-                    // Additional wait to ensure content is stable
-                    await page.waitForTimeout(2000);
-                    
-                } catch (error) {
-                    console.log(`⚠️  Timeout waiting for content on page ${currentPage}, proceeding anyway`);
-                }
-                
-                // Extract grant links using the correct selectors based on HTML structure
-                const pageLinks = await page.$$eval(
-                    'eui-card-header-title a.eui-u-text-link', 
-                    links => links.map(link => link.href)
-                );
-                
-                console.log(`📋 Found ${pageLinks.length} grant links on page ${currentPage}`);
-                
-                if (pageLinks.length === 0) {
-                    console.log(`⚠️  No grants found on page ${currentPage}, stopping pagination`);
-                    break;
-                }
-                
-                allGrantLinks.push(...pageLinks);
-                
-                // Check if we've reached the maximum number of grants
-                if (this.maxGrantsToProcess > 0 && allGrantLinks.length >= this.maxGrantsToProcess) {
-                    console.log(`✅ Reached maximum grants limit (${this.maxGrantsToProcess}), stopping pagination`);
-                    break;
-                }
-                
-                // Check if there's a next page by looking for pagination controls
-                const hasNextPage = await page.$eval('eui-paginator', (paginator) => {
-                    // Check if next page button is enabled (not disabled)
-                    const nextButton = paginator.querySelector('button[aria-label*="next"], button[aria-label*="Next"]');
-                    return nextButton && !nextButton.disabled;
-                }).catch(() => false);
-                
-                if (!hasNextPage) {
-                    console.log(`⚠️  No next page available on page ${currentPage}, stopping pagination`);
-                    break;
-                }
-                
-                currentPage++;
-                
-                // Add delay between pages
-                console.log('⏳ Waiting before next page...');
-                await page.waitForTimeout(2000);
+        for (let page = 1; page <= this.maxPages && opportunities.size < this.maxGrantsToProcess; page++) {
+            const results = await this._fetchApiPage(page);
+            if (results.length === 0) break;
+
+            for (const result of results) {
+                const metadata = result.metadata || {};
+                const url = result.url;
+                const status = firstValue(metadata, 'status');
+                if (!url?.includes('/topic-details/') || !['31094501', '31094502'].includes(status)) continue;
+                if (!opportunities.has(url)) opportunities.set(url, this._apiResultToContent(result));
             }
-        } catch (error) {
-            console.error(`❌ Error during EU Portal scraping:`, error.message);
-        } finally {
-            await browser.close();
-        }
-        
-        console.log(`📊 Total grant links found: ${allGrantLinks.length}`);
-        const uniqueLinks = [...new Set(allGrantLinks)];
-        console.log(`📊 Unique grant links: ${uniqueLinks.length}`);
-
-        // Apply max grants limit
-        const limitedLinks = this.maxGrantsToProcess > 0 
-            ? uniqueLinks.slice(0, this.maxGrantsToProcess)
-            : uniqueLinks;
-
-        // Filter out URLs that already exist in the database
-        const newLinks = await this._filterNewUrls(limitedLinks);
-        
-        if (newLinks.length === 0) {
-            console.log(`✅ All URLs already exist in database for ${this.name}. Skipping content extraction.`);
-            return [];
+            if (results.length < this.apiPageSize) break;
         }
 
-        console.log(`🔄 Processing ${newLinks.length} grants in batches of ${this.batchSize}`);
-        
-        // Process grants in batches using the specialized EU extraction method
+        const urls = [...opportunities.keys()].slice(0, this.maxGrantsToProcess);
+        const newUrls = await this._filterNewUrls(urls);
         const grants = [];
-        for (let i = 0; i < newLinks.length; i += this.batchSize) {
-            const batch = newLinks.slice(i, i + this.batchSize);
-            const batchNumber = Math.floor(i / this.batchSize) + 1;
-            const totalBatches = Math.ceil(newLinks.length / this.batchSize);
-            
-            console.log(`🔄 Processing batch ${batchNumber}/${totalBatches} (${batch.length} grants)`);
-            
-            // Process batch in parallel using specialized EU extraction
-            const batchPromises = batch.map(async (link) => {
-                try {
-                    return await this._extractDataFromUrlWithPlaywright(link);
-                } catch (error) {
-                    console.error(`❌ Error processing grant ${link}:`, error.message);
-                    return null;
-                }
-            });
-            
-            const batchResults = await Promise.all(batchPromises);
-            const validResults = batchResults.filter(result => result !== null);
-            
-            grants.push(...validResults);
-            console.log(`✅ Batch ${batchNumber} completed: ${validResults.length}/${batch.length} grants processed successfully`);
-            
-            // Add delay between batches (except for the last batch)
-            if (i + this.batchSize < newLinks.length) {
-                console.log(`⏳ Waiting ${this.delayBetweenBatches}ms before next batch...`);
-                await new Promise(resolve => setTimeout(resolve, this.delayBetweenBatches));
-            }
+
+        for (let i = 0; i < newUrls.length; i += this.batchSize) {
+            const batch = newUrls.slice(i, i + this.batchSize);
+            const results = await Promise.all(batch.map(url => this._processPageContent(opportunities.get(url), url)));
+            grants.push(...results.filter(Boolean));
         }
-        
+
+        console.log(`✅ ${this.name}: ${grants.length} grants extracted from ${urls.length} API opportunities`);
         return grants;
     }
 

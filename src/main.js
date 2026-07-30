@@ -18,7 +18,8 @@ const CONFIG = {
     SCHEDULED_SCRAPING_ENABLED: process.env.ENABLE_SCHEDULED_SCRAPING === 'true',
     SCHEDULED_REPORTS_ENABLED: process.env.ENABLE_SCHEDULED_REPORTS === 'true',
     RUN_SCRAPING_ON_STARTUP: process.env.RUN_SCRAPING_ON_STARTUP === 'true',
-    RUN_WEEKLY_REPORT_ON_STARTUP: process.env.RUN_WEEKLY_REPORT_ON_STARTUP === 'true'
+    RUN_WEEKLY_REPORT_ON_STARTUP: process.env.RUN_WEEKLY_REPORT_ON_STARTUP === 'true',
+    DRY_RUN: process.env.DRY_RUN === 'true'
 };
 
 const sources = [
@@ -37,12 +38,16 @@ async function scrapeAll() {
     console.log('🚀 Starting grant scraping process...');
     
     try {
-        // Ensure database table exists
-        await setupDatabase();
-        
-        // Clean up expired grants before scraping
-        const { cleanupExpiredGrants } = require('./lib/db');
-        await cleanupExpiredGrants();
+        if (!CONFIG.DRY_RUN) {
+            // Ensure database table exists
+            await setupDatabase();
+
+            // Clean up expired grants before scraping
+            const { cleanupExpiredGrants } = require('./lib/db');
+            await cleanupExpiredGrants();
+        } else {
+            console.log('🧪 Dry run: database writes and expired-grant cleanup are disabled.');
+        }
         
         const allGrants = [];
         let successCount = 0;
@@ -71,9 +76,11 @@ async function scrapeAll() {
         }
 
         let newlyInserted = [];
-        if (allGrants.length > 0) {
+        if (allGrants.length > 0 && !CONFIG.DRY_RUN) {
             newlyInserted = await saveGrants(allGrants);
             console.log(`💾 Processed ${allGrants.length} scraped grants (new: ${newlyInserted.length})`);
+        } else if (allGrants.length > 0) {
+            console.log(`🧪 Dry run: ${allGrants.length} grants extracted; none were saved.`);
         } else {
             console.log('ℹ️  No grants scraped to process');
         }
@@ -139,37 +146,39 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-// Start the Slack App
-startSlackApp().catch(error => {
-    console.error('💥 Failed to start Slack app:', error.message);
-    process.exit(1);
-});
+if (require.main === module) {
+    // Start the Slack App
+    startSlackApp().catch(error => {
+        console.error('💥 Failed to start Slack app:', error.message);
+        process.exit(1);
+    });
 
-// Run startup tasks if enabled
-if (CONFIG.RUN_SCRAPING_ON_STARTUP || CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP) {
-    console.log('🔄 Running startup tasks...');
-    
-    (async () => {
-        let scrapingDone = false;
-        try {
-            if (CONFIG.RUN_SCRAPING_ON_STARTUP) {
-                console.log('🚀 Starting scraping on startup...');
-                const { newlyInserted } = await scrapeAll();
-                if (newlyInserted.length > 0) {
-                    await sendWeeklyGrants(newlyInserted);
+    // Run startup tasks if enabled
+    if (CONFIG.RUN_SCRAPING_ON_STARTUP || CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP) {
+        console.log('🔄 Running startup tasks...');
+
+        (async () => {
+            let scrapingDone = false;
+            try {
+                if (CONFIG.RUN_SCRAPING_ON_STARTUP) {
+                    console.log('🚀 Starting scraping on startup...');
+                    const { newlyInserted } = await scrapeAll();
+                    if (newlyInserted.length > 0) {
+                        await sendWeeklyGrants(newlyInserted);
+                    }
+                    scrapingDone = true;
                 }
-                scrapingDone = true;
+                if (CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP && !scrapingDone) {
+                    console.log('📧 Starting weekly report on startup...');
+                    await handleWeeklyReport();
+                }
+            } catch (error) {
+                console.error('❌ Error during startup tasks:', error.message);
             }
-            if (CONFIG.RUN_WEEKLY_REPORT_ON_STARTUP && !scrapingDone) {
-                console.log('📧 Starting weekly report on startup...');
-                await handleWeeklyReport();
-            }
-        } catch (error) {
-            console.error('❌ Error during startup tasks:', error.message);
-        }
-    })();
-}
+        })();
+    }
 
-console.log('🎯 Grant Scraper application started successfully');
+    console.log('🎯 Grant Scraper application started successfully');
+}
 
 module.exports = { scrapeAll, handleWeeklyReport };

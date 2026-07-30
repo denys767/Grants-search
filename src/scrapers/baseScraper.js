@@ -19,6 +19,7 @@ const CONTENT_SELECTORS = [
   '.article-content',
   '.post-body',
   '.article-body',
+  '.article.event_info',
   'article'
 ];
 
@@ -27,6 +28,9 @@ const NON_ARTICLE_SELECTORS = [
   'nav',
   'footer',
   'form',
+  'script',
+  'style',
+  'noscript',
   '[role="navigation"]',
   '[role="complementary"]',
   '.sidebar',

@@ -312,6 +312,11 @@ async function getGrantCategories() {
 }
 
 async function saveRejectedGrant(url, title = null, rejectionReason, extractedText = null) {
+    if (process.env.DRY_RUN === 'true') {
+        console.log(`🧪 Dry run: would reject ${url} (${rejectionReason})`);
+        return;
+    }
+
     const connection = await pool.getConnection();
     try {
         // Check if this URL is already in rejected grants
