@@ -105,10 +105,14 @@ class BaseScraper {
         const page = await context.newPage();
         
         // Set timeout and navigation options
-        await page.goto(url, { 
+        const response = await page.goto(url, {
           waitUntil: 'domcontentloaded',
           timeout: this.timeoutMs 
         });
+
+        if (!response || !response.ok()) {
+          throw new Error(`HTTP ${response?.status() ?? 'no response'} while loading ${url}`);
+        }
         
         // Wait a bit for dynamic content to load
         await page.waitForTimeout(1000);

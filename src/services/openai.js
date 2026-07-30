@@ -7,7 +7,6 @@ const CONFIG = {
   MAX_TEXT_LENGTH: 50000,
   RETRY_COUNT: 3,
   RETRY_DELAY: 1000,
-  TEMPERATURE: 0.2,
   MODEL: 'gpt-5-mini'
 };
 
@@ -144,7 +143,6 @@ async function extractGrantInfo(text, url, dependencies = {}) {
       const response = await post('https://api.openai.com/v1/chat/completions', {
         model: CONFIG.MODEL,
         messages: [{ role: 'user', content: prompt }],
-        temperature: CONFIG.TEMPERATURE,
       }, {
         headers: {
           'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`

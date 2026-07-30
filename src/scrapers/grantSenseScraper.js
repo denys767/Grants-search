@@ -3,8 +3,7 @@ const BaseScraper = require('./baseScraper');
 
 class GrantSenseScraper extends BaseScraper {
     constructor() {
-        // ?limit=100 завантажує всі гранти одразу без пагінації
-        super('GrantSense', 'https://www.grantsense.com.ua/grants2025?limit=120');
+        super('GrantSense', 'https://www.grantsense.com.ua/grants2025');
         this.maxGrantsToProcess = parseInt(process.env.MAX_GRANTS) || 50;
         this.batchSize = parseInt(process.env.BATCH_SIZE) || 5;
         this.delayBetweenBatches = parseInt(process.env.BATCH_DELAY) || 1000;
@@ -25,10 +24,14 @@ class GrantSenseScraper extends BaseScraper {
             const page = await context.newPage();
 
             console.log(`🌐 Loading page: ${url}`);
-            await page.goto(url, {
+            const response = await page.goto(url, {
                 waitUntil: 'domcontentloaded',
                 timeout: 30000
             });
+
+            if (!response || !response.ok()) {
+                throw new Error(`HTTP ${response?.status() ?? 'no response'} while loading ${url}`);
+            }
 
             // Wait for Next.js grant cards to render
             await page.waitForSelector('a[href*="/grants2025/"]', { timeout: 15000 });

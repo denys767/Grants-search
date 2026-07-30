@@ -11,7 +11,7 @@ function mockPost(payload, requests) {
   };
 }
 
-test('OpenAI extraction sends low temperature and returns opportunity metadata', async () => {
+test('OpenAI extraction uses the model default temperature and returns opportunity metadata', async () => {
   const requests = [];
   const result = await extractGrantInfo(sourceText, 'https://example.test/grant', {
     post: mockPost({
@@ -25,8 +25,8 @@ test('OpenAI extraction sends low temperature and returns opportunity metadata',
     saveRejectedGrant: async () => assert.fail('A valid opportunity must not be rejected')
   });
 
-  assert.equal(CONFIG.TEMPERATURE, 0.2);
-  assert.equal(requests[0].body.temperature, 0.2);
+  assert.equal(CONFIG.TEMPERATURE, undefined);
+  assert.equal('temperature' in requests[0].body, false);
   assert.equal(result.type, 'competition');
   assert.equal(result.low_budget, true);
   assert.match(requests[0].body.messages[0].content, /internal_kse_opportunity/);

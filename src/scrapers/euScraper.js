@@ -38,6 +38,13 @@ class EUScraper extends BaseScraper {
                     waitUntil: 'networkidle',
                     timeout: 60000 
                 });
+
+                // The cookie banner overlays the page and prevents the
+                // opportunities component from becoming interactive.
+                const essentialCookiesButton = page.locator('a[href="#refuse"]');
+                if (await essentialCookiesButton.count()) {
+                    await essentialCookiesButton.click();
+                }
                 
                 // Wait for content to load (2-4 seconds as mentioned)
                 console.log('⏳ Waiting for initial page load...');
