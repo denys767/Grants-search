@@ -73,6 +73,24 @@ const categories = [
 //   ]
 // };
 
+// Set once the API reports a condition that no retry can fix (exhausted
+// credits, invalid key). Cleared at the start of every scheduled run.
+let fatalApiError = null;
+
+function isFatalApiError(error) {
+  const status = error.response?.status;
+  const code = error.response?.data?.error?.code;
+  return status === 401 || code === 'insufficient_quota';
+}
+
+function isOpenAIUnavailable() {
+  return fatalApiError !== null;
+}
+
+function resetOpenAIAvailability() {
+  fatalApiError = null;
+}
+
 const VALID_TYPES = new Set(['grant', 'competition', 'tender']);
 const VALID_REJECTION_REASONS = new Set([
   'no_matching_category',
@@ -107,6 +125,11 @@ async function extractGrantInfo(text, url, dependencies = {}) {
   const post = dependencies.post || axios.post;
   const reject = dependencies.saveRejectedGrant || saveRejectedGrant;
   const sleep = dependencies.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  if (fatalApiError) {
+    console.warn(`Skipping extraction for ${url}: OpenAI unavailable (${fatalApiError})`);
+    return null;
+  }
+
   // Validate inputs
   if (!text || text.trim().length < 50) {
     console.warn(`Insufficient text content for URL: ${url}`);
@@ -169,6 +192,12 @@ async function extractGrantInfo(text, url, dependencies = {}) {
       return { ...result, url };
 
     } catch (error) {
+      if (isFatalApiError(error)) {
+        fatalApiError = error.response?.data?.error?.message || error.message;
+        console.error(`OpenAI unavailable for the rest of this run: ${fatalApiError}`);
+        return null;
+      }
+
       attempt++;
       const isLastAttempt = attempt >= CONFIG.RETRY_COUNT;
 
@@ -186,8 +215,9 @@ async function extractGrantInfo(text, url, dependencies = {}) {
         const errorMessage = error.response?.data?.error?.message || error.message;
         console.error(`Failed to extract grant info from ${url} after ${CONFIG.RETRY_COUNT} attempts:`, errorMessage);
 
-        // Save to rejected grants table to avoid reprocessing
-        await reject(url, null, `extraction_failed: ${errorMessage}`, text.substring(0, 1000));
+        // A failed request does not say anything about the opportunity itself.
+        // Do not blacklist its URL: transient errors (including exhausted API
+        // credits) must be eligible for a later scheduled run.
         return null;
       }
 
@@ -199,4 +229,10 @@ async function extractGrantInfo(text, url, dependencies = {}) {
   return null;
 }
 
-module.exports = { extractGrantInfo, normalizeExtractionResult, CONFIG };
+module.exports = {
+  extractGrantInfo,
+  normalizeExtractionResult,
+  isOpenAIUnavailable,
+  resetOpenAIAvailability,
+  CONFIG
+};

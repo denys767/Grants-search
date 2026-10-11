@@ -176,6 +176,37 @@ async function backfillNormalizedTitles(connection) {
     }
 }
 
+async function ensureGrantsTimestamps(connection) {
+    // Older installations created these columns without defaults. Keep legacy
+    // NULLs intact (their original dates are unknown), while making every new
+    // insert receive a timestamp automatically. Only alter when needed.
+    const [columns] = await connection.execute(
+        `SELECT COLUMN_NAME, COLUMN_DEFAULT, EXTRA FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'grants' AND COLUMN_NAME IN ('created_at', 'updated_at')`,
+        [dbConfig.database]
+    );
+    const byName = new Map(columns.map(column => [column.COLUMN_NAME, column]));
+    const hasDefault = column => /current_timestamp/i.test(String(column?.COLUMN_DEFAULT || ''));
+    const hasOnUpdate = column => /on update current_timestamp/i.test(String(column?.EXTRA || ''));
+
+    const created = byName.get('created_at');
+    if (!created || !hasDefault(created)) {
+        const verb = created ? 'MODIFY' : 'ADD';
+        await connection.execute(
+            `ALTER TABLE grants ${verb} COLUMN created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP`
+        );
+        console.log('Updated grants.created_at default.');
+    }
+
+    const updated = byName.get('updated_at');
+    if (!updated || !hasDefault(updated) || !hasOnUpdate(updated)) {
+        const verb = updated ? 'MODIFY' : 'ADD';
+        await connection.execute(
+            `ALTER TABLE grants ${verb} COLUMN updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`
+        );
+        console.log('Updated grants.updated_at default.');
+    }
+}
+
 async function setupDatabase() {
     const { host, user, password, database } = dbConfig;
     let connection;
@@ -211,6 +242,7 @@ async function setupDatabase() {
         await ensureGrantsColumn(poolConnection, 'low_budget', 'TINYINT(1) NOT NULL DEFAULT 0');
         await ensureGrantsColumn(poolConnection, 'normalized_title', 'VARCHAR(255) NULL');
         await backfillNormalizedTitles(poolConnection);
+        await ensureGrantsTimestamps(poolConnection);
         console.log('Table "grants" is ready.');
         
         // Create rejected grants table
@@ -488,6 +520,7 @@ module.exports = {
     getExistingUrls, 
     saveRejectedGrant, 
     getRejectedUrls,
+    ensureGrantsTimestamps,
     getRejectedGrants,
     cleanupExpiredGrants,
     normalizeGrantTitle,

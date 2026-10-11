@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { extractGrantInfo, CONFIG } = require('../src/services/openai');
+const {
+  extractGrantInfo,
+  isOpenAIUnavailable,
+  resetOpenAIAvailability,
+  CONFIG
+} = require('../src/services/openai');
 
 const sourceText = 'Достатньо довгий текст можливості для перевірки структурованого витягання даних. '.repeat(2);
 
@@ -71,4 +76,73 @@ test('OpenAI extraction rejects an opportunity whose principal theme is irreleva
 
   assert.equal(result, null);
   assert.equal(rejections[0][2], 'irrelevant_topic');
+});
+
+test('OpenAI request failures do not blacklist an opportunity URL', async (t) => {
+  resetOpenAIAvailability();
+  t.after(resetOpenAIAvailability);
+  let rejected = false;
+  const result = await extractGrantInfo(sourceText, 'https://example.test/retry-later', {
+    post: async () => {
+      const error = new Error('Too many requests');
+      error.response = {
+        status: 429,
+        data: { error: { code: 'rate_limit_exceeded', message: 'Rate limit reached.' } }
+      };
+      throw error;
+    },
+    saveRejectedGrant: async () => { rejected = true; },
+    sleep: async () => {}
+  });
+
+  assert.equal(result, null);
+  assert.equal(rejected, false);
+  assert.equal(isOpenAIUnavailable(), false);
+});
+
+function quotaError(status, code, message) {
+  const error = new Error(message);
+  error.response = { status, data: { error: { code, message } } };
+  return error;
+}
+
+test('exhausted credits stop further OpenAI calls until availability is reset', async (t) => {
+  resetOpenAIAvailability();
+  t.after(resetOpenAIAvailability);
+
+  let calls = 0;
+  let slept = false;
+  const deps = {
+    post: async () => {
+      calls++;
+      throw quotaError(429, 'insufficient_quota', 'You exceeded your current quota.');
+    },
+    saveRejectedGrant: async () => assert.fail('Must not blacklist on API failure'),
+    sleep: async () => { slept = true; }
+  };
+
+  assert.equal(await extractGrantInfo(sourceText, 'https://example.test/a', deps), null);
+  assert.equal(calls, 1);
+  assert.equal(slept, false);
+  assert.equal(isOpenAIUnavailable(), true);
+
+  assert.equal(await extractGrantInfo(sourceText, 'https://example.test/b', deps), null);
+  assert.equal(calls, 1);
+
+  resetOpenAIAvailability();
+  await extractGrantInfo(sourceText, 'https://example.test/c', deps);
+  assert.equal(calls, 2);
+});
+
+test('an invalid API key (401) also stops further OpenAI calls', async (t) => {
+  resetOpenAIAvailability();
+  t.after(resetOpenAIAvailability);
+
+  await extractGrantInfo(sourceText, 'https://example.test/auth', {
+    post: async () => { throw quotaError(401, 'invalid_api_key', 'Incorrect API key'); },
+    saveRejectedGrant: async () => assert.fail('Must not blacklist on API failure'),
+    sleep: async () => {}
+  });
+
+  assert.equal(isOpenAIUnavailable(), true);
 });
