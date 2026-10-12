@@ -1,5 +1,5 @@
 /**
- * Test script: prints all links discovered by scrapers without touching the DB or OpenAI.
+ * Test script: prints all links discovered by scrapers without touching the DB or the LLM.
  *
  * Usage:
  *   node test-scraper-links.js <scraper1> [scraper2] ...
@@ -48,7 +48,7 @@ async function testScraper(scraperName) {
         return urls;
     };
 
-    // --- Patch: skip OpenAI extraction, just record the URL ---
+    // --- Patch: skip LLM extraction, just record the URL ---
     scraper._extractDataFromUrl = async (url) => {
         foundLinks.push(url);
         return null;

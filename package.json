@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/main.js",
     "test": "node --test test/*.test.js",
-    "test:links": "node test-scraper-links.js"
+    "test:links": "node test-scraper-links.js",
+    "check:grant": "node scripts/check-grant-url.js"
   },
   "keywords": [
     "grants",
@@ -19,6 +20,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@slack/bolt": "^3.19.0",
     "axios": "^1.7.2",
     "cheerio": "^1.0.0-rc.12",

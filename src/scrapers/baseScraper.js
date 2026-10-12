@@ -1,6 +1,6 @@
 const playwright = require('playwright');
 const cheerio = require('cheerio');
-const { extractGrantInfo, isOpenAIUnavailable } = require('../services/openai');
+const { extractGrantInfo, isLlmUnavailable } = require('../services/llm');
 const { getExistingUrls, saveRejectedGrant } = require('../lib/db');
 
 const CONTENT_SELECTORS = [
@@ -150,7 +150,7 @@ class BaseScraper {
   }
 
   async _extractDataFromUrl(url) {
-    if (isOpenAIUnavailable()) return null;
+    if (isLlmUnavailable()) return null;
 
     try {
       console.log(`🔍 Scraping content from ${url}`);

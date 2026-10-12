@@ -103,10 +103,10 @@ class BigIdeaScraper extends BaseScraper {
      */
     async _extractDataFromUrl(url) {
         const cheerio = require('cheerio');
-        const { extractGrantInfo, isOpenAIUnavailable } = require('../services/openai');
+        const { extractGrantInfo, isLlmUnavailable } = require('../services/llm');
         const { saveRejectedGrant } = require('../lib/db');
 
-        if (isOpenAIUnavailable()) return null;
+        if (isLlmUnavailable()) return null;
 
         try {
             console.log(`🔍 Scraping content from ${url}`);
