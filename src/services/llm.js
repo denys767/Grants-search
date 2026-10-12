@@ -8,7 +8,7 @@ const CONFIG = {
   RETRY_COUNT: 3,
   RETRY_DELAY: 1000,
   MODEL: 'claude-haiku-5-5',
-  MAX_TOKENS: 2000,
+  MAX_TOKENS: 16000,
   EFFORT: 'low',
   REQUEST_TIMEOUT: 60000
 };
@@ -136,10 +136,10 @@ const OUTPUT_SCHEMA = {
   properties: {
     title: { type: 'string' },
     deadline: { type: ['string', 'null'] },
-    category: { type: ['string', 'null'], enum: [...categories, null] },
+    category: { anyOf: [{ type: 'string', enum: categories }, { type: 'null' }] },
     type: { type: 'string', enum: [...VALID_TYPES] },
     low_budget: { type: 'boolean' },
-    rejection_reason: { type: ['string', 'null'], enum: [...REJECTION_REASONS, null] }
+    rejection_reason: { anyOf: [{ type: 'string', enum: REJECTION_REASONS }, { type: 'null' }] }
   },
   required: ['title', 'deadline', 'category', 'type', 'low_budget', 'rejection_reason'],
   additionalProperties: false
@@ -288,7 +288,7 @@ async function extractGrantInfo(text, url, dependencies = {}) {
         (error instanceof Anthropic.APIError && !isRetryableApiError(error));
 
       if (isLastAttempt) {
-        console.error(`Failed to extract grant info from ${url} after ${CONFIG.RETRY_COUNT} attempts:`, error.message);
+        console.error(`Failed to extract grant info from ${url} after ${attempt} attempt(s):`, error.message);
 
         // A failed request does not say anything about the opportunity itself.
         // Do not blacklist its URL: transient errors (including exhausted API

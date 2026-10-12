@@ -64,11 +64,11 @@ test('extraction calls Claude Haiku 5.5 with low effort, structured output and n
   }
   assert.equal(request.output_config.effort, 'low');
   assert.equal(request.output_config.format.type, 'json_schema');
-  assert.deepEqual(request.output_config.format.schema.properties.rejection_reason.enum.slice(-3), [
-    'kse_not_service_provider',
-    'expired',
-    null
-  ]);
+  // Nullable enums must be expressed with anyOf: the API rejects a null
+  // member inside an enum declared as type ['string', 'null'].
+  const reasonSchema = request.output_config.format.schema.properties.rejection_reason;
+  assert.deepEqual(reasonSchema.anyOf[0].enum.slice(-2), ['kse_not_service_provider', 'expired']);
+  assert.deepEqual(reasonSchema.anyOf[1], { type: 'null' });
   assert.equal(request.messages.at(-1).role, 'user');
   assert.match(request.system, /internal_kse_opportunity/);
   assert.match(request.system, /irrelevant_topic/);
