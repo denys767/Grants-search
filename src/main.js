@@ -11,7 +11,7 @@ const grantSenseScraper = require('./scrapers/grantSenseScraper');
 const veteranFundScraper = require('./scrapers/veteranFundScraper');
 const ngoNetworkScraper = require('./scrapers/ngoNetworkScraper');
 const { saveGrants, setupDatabase } = require('./lib/db');
-const { isOpenAIUnavailable, resetOpenAIAvailability } = require('./services/openai');
+const { isLlmUnavailable, resetLlmAvailability } = require('./services/llm');
 const { sendWeeklyGrants, startSlackApp, sendImmediateNewGrants } = require('./services/slack');
 
 // Configuration
@@ -37,7 +37,7 @@ const sources = [
 
 async function scrapeAll() {
     console.log('🚀 Starting grant scraping process...');
-    resetOpenAIAvailability();
+    resetLlmAvailability();
     
     try {
         if (!CONFIG.DRY_RUN) {
@@ -87,8 +87,8 @@ async function scrapeAll() {
             console.log('ℹ️  No grants scraped to process');
         }
         
-        if (isOpenAIUnavailable()) {
-            console.warn('⚠️ OpenAI became unavailable during this run; some opportunities were skipped and will be retried next run.');
+        if (isLlmUnavailable()) {
+            console.warn('⚠️ LLM became unavailable during this run; some opportunities were skipped and will be retried next run.');
         }
 
         console.log(`📊 Scraping completed. Success: ${successCount}/${sources.length}, Errors: ${errorCount}`);
